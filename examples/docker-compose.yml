@@ -1,0 +1,14 @@
+version: '3'
+services:
+  node0:
+    image: raft
+    environment:
+      - ID=0
+  node1:
+    image: raft
+    environment:
+      - ID=1
+  node2:
+    image: raft
+    environment:
+      - ID=2
