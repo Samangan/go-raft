@@ -21,6 +21,7 @@ func NewServer(me int, peerAddrs []string) (*RaftServer, error) {
 
 type RaftServer struct {
 	// Persistent state (TODO: Updated on stable storage before responding to RPCs):
+
 	currentTerm int64      // latest term server has seen
 	votedFor    *int       // candidateID that recieved vote in currentTerm (null if none)
 	log         []LogEntry // log of replicated commands
