@@ -23,7 +23,7 @@ import (
 
 func main() {
 	// NOTE: defined in docker-compose.yml
-	peerAddrs := []string{"node0:8000", "node1:8001", "node2:8002"}
+	peerAddrs := []string{"node0", "node1", "node2"}
 	me, _ := strconv.Atoi(os.Getenv("ID"))
 
 	log.Printf("Starting up server [%v: %v]", me, peerAddrs[me])
@@ -37,7 +37,7 @@ func main() {
 	// NOTE: Just testing that we can all connect: (WORKS! :D)
 	time.Sleep(2 * time.Second)
 
-	client, err := rpc.Dial("tcp", peerAddrs[1])
+	client, err := rpc.Dial("tcp", peerAddrs[1]+":8000")
 	if err != nil {
 		log.Fatal(err)
 	}

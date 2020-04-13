@@ -1,8 +1,13 @@
 package raft
 
 import (
+	"fmt"
 	"net"
 	"net/rpc"
+)
+
+const (
+	RPCPort = 8000 // TODO: Make configurable
 )
 
 func initRPC(address string, rs *RaftServer) error {
@@ -14,7 +19,7 @@ func initRPC(address string, rs *RaftServer) error {
 	}
 
 	// Start accepting incoming RPC endpoints from peers:
-	addr, err := net.ResolveTCPAddr("tcp", address)
+	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%v", address, RPCPort))
 	if err != nil {
 		return err
 	}
