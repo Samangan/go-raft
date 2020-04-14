@@ -27,7 +27,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// NOTE: Just testing that we can all connect: (WORKS! :D)
+	// NOTE: Just testing random shit here:
 	time.Sleep(2 * time.Second)
 
 	client, err := rpc.Dial("tcp", peerAddrs[1]+":8000")

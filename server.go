@@ -14,6 +14,7 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 	rs := &RaftServer{
 		serverId:               me,
 		address:                address,
+		peerAddrs:              peerAddrs,
 		applyCh:                applyCh,
 		resetElectionTimeoutCh: make(chan bool),
 
@@ -88,7 +89,31 @@ type VoteReq struct{}
 type VoteRes struct{}
 
 func (rd *RPCEndpointData) RequestVote(req *VoteReq, res *VoteRes) error {
+	log.Printf("RequestVote -> [%v]: \n", rd.rs.address)
+
+	// TODO: Implement
+	// <---
+
 	return nil
+}
+
+func sendRequestVotes(peers []string, me int) {
+	for i, p := range peers {
+		if i == me {
+			continue
+		}
+
+		go func(peer string) {
+			req := &VoteReq{}
+			res := &VoteRes{}
+			err := sendRPC(peer, "RPCEndpointData.RequestVote", req, res)
+			if err != nil {
+				log.Printf("Error sending RPC: %v \n", err)
+			}
+			// TODO: Do something with errors and response output:
+			// * If votes received from majority of servers: become leader
+		}(p)
+	}
 }
 
 type ElectoralPosition string
@@ -100,13 +125,10 @@ const (
 )
 
 func initElectionTimeout(rs *RaftServer) {
-	// TODO: Make this countdown resetable from the AppendEntry() RPC heartbeats
-	// (I need a channel to communicate this between these goroutines)
-
 	rand.Seed(time.Now().UTC().UnixNano())
-	timeout := int64(rand.Intn(20)) // TODO: Remove the debug LOONG timeouts
+	timeout := int64(rand.Intn(100)) + 1 // TODO: Remove the debug LOONG timeouts
 
-	log.Printf("Election timeout: %v ", timeout)
+	log.Printf("Election Timeout: %v ", timeout)
 
 	d := time.Duration(timeout * int64(time.Second))
 	ticker := time.NewTicker(d)
@@ -115,25 +137,43 @@ func initElectionTimeout(rs *RaftServer) {
 	for {
 		select {
 		case <-rs.resetElectionTimeoutCh:
-			log.Printf("Reset Election Timeout")
-			// TODO: Actually do the meme
-			// <---
-
+			ticker = resetElectionTimer(ticker, d)
 		case t := <-ticker.C:
-			log.Printf("Election Timeout [%v] @ %v \n", rs.address, t) // TODO: make these debug logs only
+			log.Printf("Election Timeout @ %v \n", t) // TODO: make these debug logs only
 
 			rs.lock.Lock()
-			if rs.position == Follower {
-				// transition peer to candidate:
-				log.Printf("Transitioning to Candidate: [%v -> CANDIDATE]\n", rs.position)
-				rs.position = Candidate
-			} else if rs.position == Candidate {
-				// TODO: Start new election
+			if rs.position != Leader {
+				// ??? TODO: I assume leaders dont have an election timeout ???
+				if rs.position == Follower {
+					log.Printf("Transitioning to Candidate: [%v -> CANDIDATE]\n", rs.position)
+					rs.position = Candidate
+				}
+
+				ticker = resetElectionTimer(ticker, d)
+				startElection(rs)
 			}
 			rs.lock.Unlock()
 		}
 	}
 
+}
+
+func resetElectionTimer(t *time.Ticker, d time.Duration) *time.Ticker {
+	log.Printf("Reset Election Timeout")
+
+	// PERFORMANCE TODO: This is allocating a new channel each heartbeat lol...
+	//                   Change initElectionTimeout() to just use time.Sleep() manually.
+	t.Stop()
+	return time.NewTicker(d)
+}
+
+// Warning: need to acquire rs.lock before calling.
+func startElection(rs *RaftServer) {
+	log.Printf("Starting a new election: Term=%v", rs.currentTerm+1)
+
+	rs.currentTerm++
+	rs.votedFor = &rs.serverId
+	sendRequestVotes(rs.peerAddrs, rs.serverId)
 }
 
 //
@@ -155,7 +195,7 @@ type AppendEntryRes struct {
 
 // AppendEntries is called by the leader to replicate LogEntrys and to maintain a heartbeat
 func (rd *RPCEndpointData) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) error {
-	log.Printf("AppendEntries [%v]: \n", rd.rs.address)
+	log.Printf("AppendEntries -> [%v]: \n", rd.rs.address)
 
 	res.Term = rd.rs.currentTerm
 
@@ -167,6 +207,8 @@ func (rd *RPCEndpointData) AppendEntries(req *AppendEntryReq, res *AppendEntryRe
 
 	// reset election timeout:
 	rd.rs.resetElectionTimeoutCh <- true
+
+	// TODO: If this server is currently a candidate, convert to a folower of this new leader
 
 	// TODO: Finish
 

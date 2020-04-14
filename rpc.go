@@ -19,7 +19,7 @@ func initRPC(address string, rs *RaftServer) error {
 	}
 
 	// Start accepting incoming RPC endpoints from peers:
-	addr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf("%s:%v", address, RPCPort))
+	addr, err := net.ResolveTCPAddr("tcp", makeAddr(address))
 	if err != nil {
 		return err
 	}
@@ -32,4 +32,17 @@ func initRPC(address string, rs *RaftServer) error {
 	go rpc.Accept(l)
 
 	return nil
+}
+
+func sendRPC(address, endpoint string, req interface{}, res interface{}) error {
+	client, err := rpc.Dial("tcp", makeAddr(address))
+	if err != nil {
+		return err
+	}
+
+	return client.Call(endpoint, req, res)
+}
+
+func makeAddr(peerAddr string) string {
+	return fmt.Sprintf("%s:%v", peerAddr, RPCPort)
 }
