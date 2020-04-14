@@ -14,13 +14,6 @@ import (
 	"time"
 )
 
-// TODO:
-// / Do the heartbeart part of AppendEntries RPC (leave the bulk of it as TODOs)
-// / / Test that it works.
-// * Implement RequestVote RPC
-//   <----
-// * Implement full AppendEntry RPC
-
 func main() {
 	// NOTE: defined in docker-compose.yml
 	peerAddrs := []string{"node0", "node1", "node2"}
@@ -28,11 +21,11 @@ func main() {
 
 	log.Printf("Starting up server [%v: %v]", me, peerAddrs[me])
 
-	r, err := raft.NewServer(me, peerAddrs)
+	applyMsgCh := make(chan raft.ApplyMessage)
+	_, err := raft.NewServer(me, peerAddrs, applyMsgCh)
 	if err != nil {
 		log.Fatal(err)
 	}
-	r.Start()
 
 	// NOTE: Just testing that we can all connect: (WORKS! :D)
 	time.Sleep(2 * time.Second)

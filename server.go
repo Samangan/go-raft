@@ -2,13 +2,22 @@ package raft
 
 import (
 	"log"
+	"math/rand"
+	"sync"
+	"time"
 )
 
-func NewServer(me int, peerAddrs []string) (*RaftServer, error) {
+// NewServer() will create and start a new Raft peer.
+// This will setup the RPC endpoints and begin the countdown for leader election.
+func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServer, error) {
 	address := peerAddrs[me]
 	rs := &RaftServer{
-		serverId: me,
-		address:  address,
+		serverId:               me,
+		address:                address,
+		applyCh:                applyCh,
+		resetElectionTimeoutCh: make(chan bool),
+
+		position: Follower,
 	}
 
 	err := initRPC(address, rs)
@@ -16,12 +25,15 @@ func NewServer(me int, peerAddrs []string) (*RaftServer, error) {
 		return nil, err
 	}
 
+	go initElectionTimeout(rs)
+
 	return rs, nil
 }
 
 type RaftServer struct {
-	// Persistent state (TODO: Updated on stable storage before responding to RPCs):
-
+	// Persistent state
+	// TODO: These need to be written to disk each time they change
+	//       and read from disk on NewServer()
 	currentTerm int64      // latest term server has seen
 	votedFor    *int       // candidateID that recieved vote in currentTerm (null if none)
 	log         []LogEntry // log of replicated commands
@@ -39,19 +51,33 @@ type RaftServer struct {
 	address   string   // this server's network address
 	peerAddrs []string // peer network addresses (sorted consistently across all nodes)
 
+	lock     sync.RWMutex      // locks the mutable elements of RaftServer (TODO: Make this obv here what is mutable vs immutable)
 	position ElectoralPosition // current position in current term
+
+	resetElectionTimeoutCh chan bool // triggers an election timeout reset
+
+	applyCh chan ApplyMessage // client will use to listen for newly commited log entries
 }
 
-func (*RaftServer) Start() {}
+type ApplyMessage struct{}
 
-// func Stop/Kill?
+// StartAgreement() starts to process a new entry in the replicated log.
+// It will return immediately. Use `applyCh` to listen to know when `entry` has been successfully
+// committed to the replicated log.
+func (*RaftServer) StartAgreement(entry interface{}) (index int64, term int64, isLeader bool) {
+	return -1, -1, false
+}
 
-func (*RaftServer) GetState() {}
+func (*RaftServer) GetState() (term int64, isLeader bool) {
+	return -1, false
+}
+
+func (*RaftServer) Kill() {}
 
 type LogEntry struct{}
 
 // TODO: Should probably put below in different go files / package than main. But Im going to get this all working first before refactoring.
-type RPCEndpointData struct {
+type RPCEndpointData struct { // TODO: Not shitty name
 	rs *RaftServer
 }
 
@@ -72,6 +98,43 @@ const (
 	Candidate ElectoralPosition = "CANDIDATE"
 	Leader    ElectoralPosition = "LEADER"
 )
+
+func initElectionTimeout(rs *RaftServer) {
+	// TODO: Make this countdown resetable from the AppendEntry() RPC heartbeats
+	// (I need a channel to communicate this between these goroutines)
+
+	rand.Seed(time.Now().UTC().UnixNano())
+	timeout := int64(rand.Intn(20)) // TODO: Remove the debug LOONG timeouts
+
+	log.Printf("Election timeout: %v ", timeout)
+
+	d := time.Duration(timeout * int64(time.Second))
+	ticker := time.NewTicker(d)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-rs.resetElectionTimeoutCh:
+			log.Printf("Reset Election Timeout")
+			// TODO: Actually do the meme
+			// <---
+
+		case t := <-ticker.C:
+			log.Printf("Election Timeout [%v] @ %v \n", rs.address, t) // TODO: make these debug logs only
+
+			rs.lock.Lock()
+			if rs.position == Follower {
+				// transition peer to candidate:
+				log.Printf("Transitioning to Candidate: [%v -> CANDIDATE]\n", rs.position)
+				rs.position = Candidate
+			} else if rs.position == Candidate {
+				// TODO: Start new election
+			}
+			rs.lock.Unlock()
+		}
+	}
+
+}
 
 //
 // Log Replication:
@@ -101,6 +164,9 @@ func (rd *RPCEndpointData) AppendEntries(req *AppendEntryReq, res *AppendEntryRe
 		res.Success = false
 		return nil
 	}
+
+	// reset election timeout:
+	rd.rs.resetElectionTimeoutCh <- true
 
 	// TODO: Finish
 
