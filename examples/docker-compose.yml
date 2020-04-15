@@ -12,3 +12,7 @@ services:
     image: raft
     environment:
       - ID=2
+  node3:
+    image: raft
+    environment:
+      - ID=3

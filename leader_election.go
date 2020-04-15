@@ -14,7 +14,11 @@ const (
 	Leader    ElectoralPosition = "LEADER"
 )
 
-func initElectionTimeout(rs *RaftServer) {
+// electionSupervisor() is the primary election goroutine responsible for:
+// * Election Timeout ticking and resetting
+// * Starting an election after the election timeout
+// * Vote counting during an election phase
+func electionSupervisor(rs *RaftServer) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	timeout := int64(rand.Intn(100)) + 1 // TODO: Remove the debug LOONG timeouts
 
@@ -24,23 +28,43 @@ func initElectionTimeout(rs *RaftServer) {
 	ticker := time.NewTicker(d)
 	defer ticker.Stop()
 
+	voteCh := make(chan *VoteRes)
+	voteCount := 0
+
 	for {
 		select {
 		case <-rs.resetElectionTimeoutCh:
 			ticker = resetElectionTimer(ticker, d)
 		case t := <-ticker.C:
-			log.Printf("Election Timeout @ %v \n", t) // TODO: make these debug logs only
+			// TODO: make these debug logs only
+			log.Printf("Election Timeout @ %v \n", t)
 
 			rs.lock.Lock()
 			if rs.position != Leader {
-				// ??? TODO: I assume leaders dont have an election timeout ???
 				if rs.position == Follower {
 					log.Printf("Transitioning to Candidate: [%v -> CANDIDATE]\n", rs.position)
 					rs.position = Candidate
 				}
 
 				ticker = resetElectionTimer(ticker, d)
-				startElection(rs)
+				voteCount = 0
+				startElection(rs, voteCh)
+			}
+			rs.lock.Unlock()
+		case v := <-voteCh:
+			// Tally vote:
+			rs.lock.Lock()
+			if v.Term > rs.currentTerm {
+				becomeFollower(rs, v.Term)
+			}
+
+			if v.Term == rs.currentTerm && rs.position == Candidate {
+				voteCount++
+
+				if voteCount >= len(rs.peerAddrs)/2 {
+					log.Printf("Transitioning to Leader: [%v -> LEADER] with %v votes", rs.position, voteCount)
+					rs.position = Leader
+				}
 			}
 			rs.lock.Unlock()
 		}
@@ -49,6 +73,10 @@ func initElectionTimeout(rs *RaftServer) {
 }
 
 func resetElectionTimer(t *time.Ticker, d time.Duration) *time.Ticker {
+	// TODO: This should recalculate a new random duration each time
+	//       so that when peers' timeouts accidentally align it auto heals
+	//       without being livelocked forever...
+
 	log.Printf("Reset Election Timeout")
 
 	// PERFORMANCE TODO: This is allocating a new channel each heartbeat lol...
@@ -58,15 +86,16 @@ func resetElectionTimer(t *time.Ticker, d time.Duration) *time.Ticker {
 }
 
 // Warning: need to acquire rs.lock before calling.
-func startElection(rs *RaftServer) {
+func startElection(rs *RaftServer, voteCh chan *VoteRes) {
 	log.Printf("Starting a new election: Term=%v", rs.currentTerm+1)
 
 	rs.currentTerm++
 	rs.votedFor = &rs.serverId
-	sendRequestVotes(rs.peerAddrs, rs.serverId, rs.currentTerm)
+
+	sendRequestVotes(rs.peerAddrs, rs.serverId, rs.currentTerm, voteCh)
 }
 
-func sendRequestVotes(peers []string, serverId int, currentTerm int64) {
+func sendRequestVotes(peers []string, serverId int, currentTerm int64, voteCh chan *VoteRes) {
 	for i, p := range peers {
 		if i == serverId {
 			continue
@@ -80,12 +109,21 @@ func sendRequestVotes(peers []string, serverId int, currentTerm int64) {
 			res := &VoteRes{}
 			err := sendRPC(peer, "RPCHandler.RequestVote", req, res)
 			if err != nil {
-				log.Printf("Error sending RPC: %v \n", err)
+				log.Printf("Error sending RequestVote RPC: %v \n", err)
+			} else {
+				voteCh <- res
 			}
-			// TODO: Do something with errors and response output:
-			// * If votes received from majority of servers: become leader
 		}(p)
 	}
+}
+
+// becomeFollower() will be called once a candidate or leader finds a
+// more up to date Leader to follow.
+// Warning: need to acquire rs.lock before calling.
+func becomeFollower(rs *RaftServer, newTerm int64) {
+	log.Printf("Transitioning to Follower: [%v -> Follower]\n", rs.position)
+	rs.position = Follower
+	rs.currentTerm = newTerm
 }
 
 //
@@ -125,7 +163,10 @@ func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 			if rs.commitIndex == 0 || rs.log[rs.commitIndex-1].Term <= req.LastLogTerm {
 				log.Printf("Voting for candidate")
 
-				res.Term = rs.currentTerm
+				// reset election timeout:
+				rs.resetElectionTimeoutCh <- true
+
+				res.Term = req.Term
 				res.VoteGranted = true
 				return nil
 			}

@@ -57,7 +57,9 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 		return nil, err
 	}
 
-	go initElectionTimeout(rs)
+	go electionSupervisor(rs)
+
+	go heartbeatSupervisor(rs)
 
 	return rs, nil
 }
@@ -65,9 +67,9 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 type ApplyMessage struct{}
 
 // StartAgreement() starts to process a new entry in the replicated log.
-// It will return immediately. Use `applyCh` to listen to know when `entry` has been successfully
+// It will return immediately. Use `applyCh` to listen to know when `command` has been successfully
 // committed to the replicated log.
-func (*RaftServer) StartAgreement(entry interface{}) (index int64, term int64, isLeader bool) {
+func (*RaftServer) StartAgreement(command interface{}) (index int64, term int64, isLeader bool) {
 	return -1, -1, false
 }
 

@@ -8,15 +8,13 @@ package main
 import (
 	"github.com/Samangan/go-raft"
 	"log"
-	"net/rpc"
 	"os"
 	"strconv"
-	"time"
 )
 
 func main() {
 	// NOTE: defined in docker-compose.yml
-	peerAddrs := []string{"node0", "node1", "node2"}
+	peerAddrs := []string{"node0", "node1", "node2", "node3"}
 	me, _ := strconv.Atoi(os.Getenv("ID"))
 
 	log.Printf("Starting up server [%v: %v]", me, peerAddrs[me])
@@ -28,19 +26,19 @@ func main() {
 	}
 
 	// NOTE: Just testing random shit here:
-	time.Sleep(2 * time.Second)
+	// time.Sleep(2 * time.Second)
 
-	client, err := rpc.Dial("tcp", peerAddrs[1]+":8000")
-	if err != nil {
-		log.Fatal(err)
-	}
+	// client, err := rpc.Dial("tcp", peerAddrs[1]+":8000")
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	req := &raft.AppendEntryReq{}
-	res := &raft.AppendEntryRes{}
-	err = client.Call("RPCHandler.AppendEntries", req, res)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// req := &raft.AppendEntryReq{}
+	// res := &raft.AppendEntryRes{}
+	// err = client.Call("RPCHandler.AppendEntries", req, res)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	for {
 	}
