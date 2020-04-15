@@ -17,6 +17,10 @@ RUN go mod download
 COPY . .
 
 # Build the application
+
+# TODO: build with `-race` enabled
+#       Apparently this works now: https://github.com/golang/go/issues/14481
+
 RUN go build -o examples/main examples/main.go
 
 WORKDIR /app

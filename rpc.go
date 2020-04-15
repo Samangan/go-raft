@@ -10,9 +10,13 @@ const (
 	RPCPort = 8000 // TODO: Make configurable
 )
 
+type RPCHandler struct {
+	rs *RaftServer
+}
+
 func initRPC(address string, rs *RaftServer) error {
 	// Register RPC endpoints:
-	re := &RPCEndpointData{rs}
+	re := &RPCHandler{rs}
 	err := rpc.Register(re)
 	if err != nil {
 		return err

@@ -37,7 +37,7 @@ func main() {
 
 	req := &raft.AppendEntryReq{}
 	res := &raft.AppendEntryRes{}
-	err = client.Call("RPCEndpointData.AppendEntries", req, res)
+	err = client.Call("RPCHandler.AppendEntries", req, res)
 	if err != nil {
 		log.Fatal(err)
 	}
