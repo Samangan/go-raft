@@ -30,23 +30,20 @@ type RaftServer struct {
 
 	resetElectionTimeoutCh chan bool // triggers an election timeout reset
 
-	applyCh chan ApplyMessage // client will use to listen for newly commited log entries
-}
-
-type LogEntry struct {
-	Command interface{} // command is the actual state change replicated across the peers
-	Term    int64       // the election term when entry was recieved by leader
+	applyCh      chan ApplyMessage // client will use to listen for newly commited log entries
+	stateMachine FSM               // client state machine where committed commands will be applied
 }
 
 // NewServer() will create and start a new Raft peer.
 // This will setup the RPC endpoints and begin the countdown for leader election.
-func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServer, error) {
+func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage, stateMachine FSM) (*RaftServer, error) {
 	address := peerAddrs[me]
 	rs := &RaftServer{
 		serverId:               me,
 		address:                address,
 		peerAddrs:              peerAddrs,
 		applyCh:                applyCh,
+		stateMachine:           stateMachine,
 		resetElectionTimeoutCh: make(chan bool),
 		commitIndex:            -1,
 		lastApplied:            -1,
@@ -65,7 +62,18 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 	return rs, nil
 }
 
-type ApplyMessage struct{}
+type LogEntry struct {
+	Command interface{} // command is the actual state change replicated across the peers
+	Term    int64       // the election term when entry was recieved by leader
+
+}
+type ApplyMessage struct {
+	Entry   LogEntry
+	Success bool
+}
+type FSM interface {
+	Apply(LogEntry) interface{}
+}
 
 // ApplyEntry() starts to process a new command in the replicated log.
 // It will return immediately. Use `rs.applyCh` to listen to know when `command` has been successfully
@@ -129,12 +137,17 @@ func (rs *RaftServer) ApplyEntry(command interface{}) (index int64, term int64, 
 							}
 						}
 						if c >= len(rs.peerAddrs)/2 {
-							log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
-							rs.commitIndex = lastLogIndex
+							// TODO: Sending ApplyMessage should be done in a separate long-running goroutine
+							//       to serialize the entries sent over it and because sending a msg over rs.applyCh
+							//       can block.
 
-							// TODO: use rs.applyCh to communicate with client that
-							// it's commited and can be stored in state machine now
-							// <----
+							log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
+
+							rs.commitIndex = lastLogIndex
+							rs.stateMachine.Apply(entry)
+							rs.lastApplied = lastLogIndex
+
+							rs.applyCh <- ApplyMessage{entry, true}
 						}
 					}
 				} else {

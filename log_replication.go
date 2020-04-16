@@ -112,6 +112,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		return nil
 	}
 
+	// Add new entries if not a heartbeat:
 	if req.Entries != nil {
 		log.Printf("New Entries: %v", req.Entries)
 
@@ -124,6 +125,10 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		// TODO: If leaderCommit > commitIndex, set commitIndex =
 		// min(leaderCommit, index of last new entry)
 	}
+
+	// TODO: Apply any commited log entries to this server's state machine:
+	// * If commitIndex > lastApplied: increment lastApplied, apply
+	// log[lastApplied] to state machine.
 
 	if rs.position == Candidate || rs.position == Leader && req.Term > rs.currentTerm {
 		becomeFollower(rs, req.Term)

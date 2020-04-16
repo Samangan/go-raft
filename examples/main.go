@@ -13,6 +13,15 @@ import (
 	"time"
 )
 
+type KVStore struct {
+	store map[string]string
+}
+
+func (kv KVStore) Apply(entry raft.LogEntry) interface{} {
+	log.Printf("[Apply()] entry: %v", entry)
+	return -1
+}
+
 func main() {
 	// NOTE: defined in docker-compose.yml
 	peerAddrs := []string{"node0", "node1", "node2", "node3"}
@@ -21,7 +30,9 @@ func main() {
 	log.Printf("[CLIENT] Starting up server [%v: %v]", me, peerAddrs[me])
 
 	applyMsgCh := make(chan raft.ApplyMessage)
-	r, err := raft.NewServer(me, peerAddrs, applyMsgCh)
+	kvs := KVStore{make(map[string]string)}
+
+	r, err := raft.NewServer(me, peerAddrs, applyMsgCh, kvs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,6 +55,9 @@ func main() {
 		//log.Println("[CLIENT] Calling ApplyEntry. . .")
 		//r.ApplyEntry(43)
 	}
+
+	res := <-applyMsgCh
+	log.Printf("Recieved: %v", res.Entry.Command)
 
 	for {
 	}
