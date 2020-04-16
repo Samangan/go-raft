@@ -22,13 +22,11 @@ type RaftServer struct {
 	nextIndex  []int64 // index of next LogEntry to send to each server
 	matchIndex []int64 // index of the highest LogEntry known to be replicated to each server
 
-	// OTHER SHIT I NEED TO ORGANIZE:
-	serverId  int      // the index of it's address in `peerAddrs`
-	address   string   // this server's network address
-	peerAddrs []string // peer network addresses (sorted consistently across all nodes)
-
-	lock     sync.RWMutex      // locks the mutable elements of RaftServer (TODO: Make this obv here what is mutable vs immutable)
-	position ElectoralPosition // current position in current term
+	lock      sync.RWMutex      // locks the mutable elements of RaftServer (TODO: Make this obv here what is mutable vs immutable)
+	serverId  int               // the index of it's address in `peerAddrs`
+	address   string            // this server's network address
+	peerAddrs []string          // peer network addresses (sorted consistently across all nodes)
+	position  ElectoralPosition // current position in current term
 
 	resetElectionTimeoutCh chan bool // triggers an election timeout reset
 
@@ -50,8 +48,9 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 		peerAddrs:              peerAddrs,
 		applyCh:                applyCh,
 		resetElectionTimeoutCh: make(chan bool),
-
-		position: Follower,
+		commitIndex:            -1,
+		lastApplied:            -1,
+		position:               Follower,
 	}
 
 	err := initRPC(address, rs)
@@ -69,7 +68,7 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage) (*RaftServ
 type ApplyMessage struct{}
 
 // ApplyEntry() starts to process a new command in the replicated log.
-// It will return immediately. Use `applyCh` to listen to know when `command` has been successfully
+// It will return immediately. Use `rs.applyCh` to listen to know when `command` has been successfully
 // committed to the replicated log.
 //
 // If this server is not the leader, then an error will be returned and the client must
@@ -119,18 +118,22 @@ func (rs *RaftServer) ApplyEntry(command interface{}) (index int64, term int64, 
 					rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
 					rs.nextIndex[r.PeerId]++
 
+					log.Printf("lastLogIndex: %v; rs.commitIndex: %v; rs.log: %v; rs.currentTerm: %v", lastLogIndex, rs.commitIndex, rs.log, rs.currentTerm)
+
 					if lastLogIndex > rs.commitIndex && rs.log[lastLogIndex].Term == rs.currentTerm {
 						// Check if we have a majority to commit:
 						c := 0
-						for _, mi := range rs.matchIndex {
-							if mi >= lastLogIndex {
+						for i, mi := range rs.matchIndex {
+							if i != rs.serverId && mi >= lastLogIndex {
 								c++
 							}
 						}
-						if c >= len(rs.peerAddrs)/2+1 {
+						if c >= len(rs.peerAddrs)/2 {
 							log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
 							rs.commitIndex = lastLogIndex
-							// TODO: use rs.applyCh to communicate with client that it's commited and can be stored in state machine now
+
+							// TODO: use rs.applyCh to communicate with client that
+							// it's commited and can be stored in state machine now
 							// <----
 						}
 					}

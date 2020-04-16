@@ -113,6 +113,8 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 	}
 
 	if req.Entries != nil {
+		log.Printf("New Entries: %v", req.Entries)
+
 		// TODO: If an existing entry conflicts with a new one (same index
 		// but different terms), delete the existing entry and all that
 		// follow it
@@ -131,5 +133,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 
 	// reset election timeout to maintain allegiance to leader:
 	rs.resetElectionTimeoutCh <- true
+
+	res.Success = true
 	return nil
 }

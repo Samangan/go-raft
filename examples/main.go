@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 )
 
 func main() {
@@ -17,10 +18,10 @@ func main() {
 	peerAddrs := []string{"node0", "node1", "node2", "node3"}
 	me, _ := strconv.Atoi(os.Getenv("ID"))
 
-	log.Printf("Starting up server [%v: %v]", me, peerAddrs[me])
+	log.Printf("[CLIENT] Starting up server [%v: %v]", me, peerAddrs[me])
 
 	applyMsgCh := make(chan raft.ApplyMessage)
-	_, err := raft.NewServer(me, peerAddrs, applyMsgCh)
+	r, err := raft.NewServer(me, peerAddrs, applyMsgCh)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,6 +30,21 @@ func main() {
 	// I should make:
 	// * Unit tests
 	// * "Integration" test suite that will test through common things with multiple nodes
+
+	// NOTE: For now doing some more manual testing on each node:
+	_, err = r.GetLeader()
+	for err != nil {
+		log.Printf("[CLIENT] Waiting for a leader to be elected. . .")
+		time.Sleep(10 * time.Second)
+		_, err = r.GetLeader()
+	}
+
+	if _, isLeader := r.GetState(); isLeader {
+		log.Println("[CLIENT] Calling ApplyEntry. . .")
+		r.ApplyEntry(42)
+		//log.Println("[CLIENT] Calling ApplyEntry. . .")
+		//r.ApplyEntry(43)
+	}
 
 	for {
 	}

@@ -174,6 +174,8 @@ func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 		lastLogIndex, lastLogTerm := rs.getLastLogInfo()
 		if lastLogIndex <= req.LastLogIndex && lastLogTerm <= req.LastLogTerm {
 			log.Printf("Voting for candidate")
+			rs.votedFor = &req.CandidateId
+
 			// reset election timeout:
 			rs.resetElectionTimeoutCh <- true
 
