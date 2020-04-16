@@ -32,8 +32,7 @@ func main() {
 	// * "Integration" test suite that will test through common things with multiple nodes
 
 	// NOTE: For now doing some more manual testing on each node:
-	_, err = r.GetLeader()
-	for err != nil {
+	for _, err := r.GetLeader(); err != nil; {
 		log.Printf("[CLIENT] Waiting for a leader to be elected. . .")
 		time.Sleep(10 * time.Second)
 		_, err = r.GetLeader()
