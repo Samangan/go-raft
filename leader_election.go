@@ -60,10 +60,8 @@ func electionSupervisor(rs *RaftServer) {
 
 			if v.Term == rs.currentTerm && rs.position == Candidate {
 				voteCount++
-
-				if voteCount >= len(rs.peerAddrs)/2 {
-					log.Printf("Transitioning to Leader: [%v -> LEADER] with %v votes", rs.position, voteCount)
-					rs.position = Leader
+				if voteCount >= len(rs.peerAddrs)/2+1 {
+					becomeLeader(rs, voteCount)
 				}
 			}
 			rs.lock.Unlock()
@@ -91,11 +89,11 @@ func startElection(rs *RaftServer, voteCh chan *VoteRes) {
 
 	rs.currentTerm++
 	rs.votedFor = &rs.serverId
-
-	sendRequestVotes(rs.peerAddrs, rs.serverId, rs.currentTerm, voteCh)
+	lastLogIndex, lastLogTerm := rs.getLastLogInfo()
+	sendRequestVotes(rs.peerAddrs, rs.serverId, rs.currentTerm, lastLogIndex, lastLogTerm, voteCh)
 }
 
-func sendRequestVotes(peers []string, serverId int, currentTerm int64, voteCh chan *VoteRes) {
+func sendRequestVotes(peers []string, serverId int, currentTerm, lastLogIndex, lastLogTerm int64, voteCh chan *VoteRes) {
 	for i, p := range peers {
 		if i == serverId {
 			continue
@@ -103,8 +101,10 @@ func sendRequestVotes(peers []string, serverId int, currentTerm int64, voteCh ch
 
 		go func(peer string) {
 			req := &VoteReq{
-				Term:        currentTerm,
-				CandidateId: serverId,
+				Term:         currentTerm,
+				CandidateId:  serverId,
+				LastLogIndex: lastLogIndex,
+				LastLogTerm:  lastLogTerm,
 			}
 			res := &VoteRes{}
 			err := sendRPC(peer, "RPCHandler.RequestVote", req, res)
@@ -124,6 +124,18 @@ func becomeFollower(rs *RaftServer, newTerm int64) {
 	log.Printf("Transitioning to Follower: [%v -> Follower]\n", rs.position)
 	rs.position = Follower
 	rs.currentTerm = newTerm
+}
+
+func becomeLeader(rs *RaftServer, voteCount int) {
+	log.Printf("Transitioning to Leader: [%v -> LEADER] with %v votes", rs.position, voteCount)
+	rs.position = Leader
+
+	// init nextIndex / matchIndex:
+	rs.nextIndex = make([]int64, len(rs.peerAddrs))
+	rs.matchIndex = make([]int64, len(rs.peerAddrs))
+	for i, _ := range rs.nextIndex {
+		rs.nextIndex[i] = int64(len(rs.log) + 1)
+	}
 }
 
 //
@@ -159,17 +171,15 @@ func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 
 	// if receiver hasn't voted yet and has at least as up to date of log then vote yes
 	if rs.votedFor == nil || *rs.votedFor == req.CandidateId {
-		if rs.commitIndex <= req.LastLogIndex {
-			if rs.commitIndex == 0 || rs.log[rs.commitIndex-1].Term <= req.LastLogTerm {
-				log.Printf("Voting for candidate")
+		lastLogIndex, lastLogTerm := rs.getLastLogInfo()
+		if lastLogIndex <= req.LastLogIndex && lastLogTerm <= req.LastLogTerm {
+			log.Printf("Voting for candidate")
+			// reset election timeout:
+			rs.resetElectionTimeoutCh <- true
 
-				// reset election timeout:
-				rs.resetElectionTimeoutCh <- true
-
-				res.Term = req.Term
-				res.VoteGranted = true
-				return nil
-			}
+			res.Term = req.Term
+			res.VoteGranted = true
+			return nil
 		}
 	}
 

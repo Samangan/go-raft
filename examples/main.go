@@ -25,20 +25,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// NOTE: Just testing random shit here:
-	// time.Sleep(2 * time.Second)
-
-	// client, err := rpc.Dial("tcp", peerAddrs[1]+":8000")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	// req := &raft.AppendEntryReq{}
-	// res := &raft.AppendEntryRes{}
-	// err = client.Call("RPCHandler.AppendEntries", req, res)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	// TODO: Testing this is going to be hard until I have an actual client usage of this.
+	// I should make:
+	// * Unit tests
+	// * "Integration" test suite that will test through common things with multiple nodes
 
 	for {
 	}
