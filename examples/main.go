@@ -6,6 +6,7 @@ package main
 // * ...
 
 import (
+	"encoding/json"
 	"github.com/Samangan/go-raft"
 	"log"
 	"os"
@@ -18,9 +19,32 @@ type KVStore struct {
 }
 
 func (kv KVStore) Apply(entry raft.LogEntry) interface{} {
-	log.Printf("[Apply()] entry: %v", entry)
-	return -1
+	log.Printf("[Apply()] Applying new entry to stateMachine")
+
+	command := &KVCommand{}
+	err := json.Unmarshal(entry.Command, command)
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("-- command: %v --", command)
+
+	if command.Operation == Put {
+		kv.store[command.Key] = command.Value
+	}
+	return command.Value
 }
+
+type KVCommand struct {
+	Key       string
+	Value     string
+	Operation Op
+}
+type Op string
+
+const (
+	Put    Op = "PUT"
+	Delete Op = "DELETE"
+)
 
 func main() {
 	// NOTE: defined in docker-compose.yml
@@ -28,11 +52,9 @@ func main() {
 	me, _ := strconv.Atoi(os.Getenv("ID"))
 
 	log.Printf("[CLIENT] Starting up server [%v: %v]", me, peerAddrs[me])
-
-	applyMsgCh := make(chan raft.ApplyMessage)
 	kvs := KVStore{make(map[string]string)}
 
-	r, err := raft.NewServer(me, peerAddrs, applyMsgCh, kvs)
+	r, err := raft.NewServer(me, peerAddrs, kvs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,13 +73,42 @@ func main() {
 
 	if _, isLeader := r.GetState(); isLeader {
 		log.Println("[CLIENT] Calling ApplyEntry. . .")
-		r.ApplyEntry(42)
-		//log.Println("[CLIENT] Calling ApplyEntry. . .")
-		//r.ApplyEntry(43)
-	}
+		c := &KVCommand{
+			Key:       "x",
+			Value:     "42",
+			Operation: Put,
+		}
+		b, err := json.Marshal(c)
+		if err != nil {
+			panic(err)
+		}
+		r.ApplyEntry(b)
 
-	res := <-applyMsgCh
-	log.Printf("Recieved: %v", res.Entry.Command)
+		log.Println("[CLIENT] Calling ApplyEntry again. . .")
+		c = &KVCommand{
+			Key:       "y",
+			Value:     "1000",
+			Operation: Put,
+		}
+		b, err = json.Marshal(c)
+		if err != nil {
+			panic(err)
+		}
+		r.ApplyEntry(b)
+
+		c.Value = "-1"
+		b, err = json.Marshal(c)
+		if err != nil {
+			panic(err)
+		}
+		r.ApplyEntry(b)
+
+		// TODO: This isnt going to ALWAYS work because, each time I immediately
+		// add the new entry to the leader's log and Im only sending one entry each time
+		// and more importantly I havent implemented the AppendEntry() response failure logic
+		// to work backwards sending older entries until the followers are caught up.
+		// <---- (This is a good case to test that that works though)
+	}
 
 	for {
 	}

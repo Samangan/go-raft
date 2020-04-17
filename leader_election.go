@@ -136,6 +136,10 @@ func becomeLeader(rs *RaftServer, voteCount int) {
 	for i, _ := range rs.nextIndex {
 		rs.nextIndex[i] = int64(len(rs.log) + 1)
 	}
+
+	// TODO: Ideally I would kill this applyEntrySupervisor goroutine when this node
+	//       stops being a leader.
+	go applyEntrySupervisor(rs)
 }
 
 //

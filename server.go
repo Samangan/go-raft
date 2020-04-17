@@ -2,7 +2,6 @@ package raft
 
 import (
 	"errors"
-	"log"
 	"sync"
 )
 
@@ -28,23 +27,23 @@ type RaftServer struct {
 	peerAddrs []string          // peer network addresses (sorted consistently across all nodes)
 	position  ElectoralPosition // current position in current term
 
-	resetElectionTimeoutCh chan bool // triggers an election timeout reset
+	resetElectionTimeoutCh chan bool            // triggers an election timeout reset
+	aerCh                  chan *AppendEntryRes // used to process replication log responses from followers
 
-	applyCh      chan ApplyMessage // client will use to listen for newly commited log entries
-	stateMachine FSM               // client state machine where committed commands will be applied
+	stateMachine FSM // client supplied state machine where committed commands will be applied
 }
 
 // NewServer() will create and start a new Raft peer.
 // This will setup the RPC endpoints and begin the countdown for leader election.
-func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage, stateMachine FSM) (*RaftServer, error) {
+func NewServer(me int, peerAddrs []string, stateMachine FSM) (*RaftServer, error) {
 	address := peerAddrs[me]
 	rs := &RaftServer{
 		serverId:               me,
 		address:                address,
 		peerAddrs:              peerAddrs,
-		applyCh:                applyCh,
 		stateMachine:           stateMachine,
 		resetElectionTimeoutCh: make(chan bool),
+		aerCh:                  make(chan *AppendEntryRes), // TODO: Should this be a buffered channel?
 		commitIndex:            -1,
 		lastApplied:            -1,
 		position:               Follower,
@@ -63,8 +62,8 @@ func NewServer(me int, peerAddrs []string, applyCh chan ApplyMessage, stateMachi
 }
 
 type LogEntry struct {
-	Command interface{} // command is the actual state change replicated across the peers
-	Term    int64       // the election term when entry was recieved by leader
+	Command []byte // command is the actual state change replicated across the peers
+	Term    int64  // the election term when entry was recieved by leader
 
 }
 type ApplyMessage struct {
@@ -76,15 +75,15 @@ type FSM interface {
 }
 
 // ApplyEntry() starts to process a new command in the replicated log.
-// It will return immediately. Use `rs.applyCh` to listen to know when `command` has been successfully
-// committed to the replicated log.
+// It will return immediately. rs.stateMachine.Apply() will be called when `command` has been successfully
+// committed and applied to a node.
 //
 // If this server is not the leader, then an error will be returned and the client must
 // use `GetLeader()` to communicate with the known leader instead.
 //
 // This means that the client must do some sort of leader forwarding if they dont want to propagate
 // this error to the client of their service.
-func (rs *RaftServer) ApplyEntry(command interface{}) (index int64, term int64, err error) {
+func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
@@ -96,7 +95,6 @@ func (rs *RaftServer) ApplyEntry(command interface{}) (index int64, term int64, 
 		return -1, -1, errors.New("Server not leader")
 	}
 
-	aesResCh := make(chan *AppendEntryRes, len(rs.peerAddrs))
 	entry := LogEntry{
 		Command: command,
 		Term:    rs.currentTerm,
@@ -104,63 +102,15 @@ func (rs *RaftServer) ApplyEntry(command interface{}) (index int64, term int64, 
 
 	rs.log = append(rs.log, entry)
 
-	lastLogIndex, _ := rs.getLastLogInfo()
 	prevLogIndex, prevLogTerm := rs.getPrevLogInfo()
 	entries := &[]LogEntry{entry}
 
 	// TODO: I shouldn't only send the latest LogEntry to each peer, I need to send all the ones
 	//       that they are missing via rs.nextIndex.
 	//       (Also be sure to change the nextIndex/matchIndex success logic below to match this change)
-	sendAppendEntries(rs.peerAddrs, rs.serverId, rs.currentTerm, rs.commitIndex, prevLogIndex, prevLogTerm, entries, aesResCh)
+	sendAppendEntries(rs.peerAddrs, rs.serverId, rs.currentTerm, rs.commitIndex, prevLogIndex, prevLogTerm, entries, rs.aerCh)
 
-	go func() {
-		for {
-			select {
-			case r := <-aesResCh:
-				rs.lock.Lock()
-				if r.Term > rs.currentTerm {
-					becomeFollower(rs, r.Term)
-				}
-
-				if r.Success {
-					rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
-					rs.nextIndex[r.PeerId]++
-
-					log.Printf("lastLogIndex: %v; rs.commitIndex: %v; rs.log: %v; rs.currentTerm: %v", lastLogIndex, rs.commitIndex, rs.log, rs.currentTerm)
-
-					if lastLogIndex > rs.commitIndex && rs.log[lastLogIndex].Term == rs.currentTerm {
-						// Check if we have a majority to commit:
-						c := 0
-						for i, mi := range rs.matchIndex {
-							if i != rs.serverId && mi >= lastLogIndex {
-								c++
-							}
-						}
-						if c >= len(rs.peerAddrs)/2 {
-							// TODO: Sending ApplyMessage should be done in a separate long-running goroutine
-							//       to serialize the entries sent over it and because sending a msg over rs.applyCh
-							//       can block.
-
-							log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
-
-							rs.commitIndex = lastLogIndex
-							rs.stateMachine.Apply(entry)
-							rs.lastApplied = lastLogIndex
-
-							rs.applyCh <- ApplyMessage{entry, true}
-						}
-					}
-				} else {
-					// TODO: if AppendEntries fails because of log inconsistency
-					// decrement rs.nextIndex[peerId] and try again
-				}
-				rs.lock.Unlock()
-			}
-		}
-	}()
-
-	// TODO: Finish
-	return -1, -1, nil
+	return prevLogIndex + 1, rs.currentTerm, nil
 }
 
 // GetLeader() returns what this server thinks is the current leader.

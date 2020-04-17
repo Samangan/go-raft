@@ -6,7 +6,7 @@ import (
 )
 
 // heartbeatSupervisor() is the goroutine responsible for:
-// * Sending periodic heartbeats to all peers to maintain allegiance if Leader
+// * Sending and receiving periodic heartbeats to all peers to maintain allegiance if Leader
 func heartbeatSupervisor(rs *RaftServer) {
 	timeout := 1 * time.Second // TODO: Make these configurable so I can have long debug times locally
 
@@ -31,6 +31,57 @@ func heartbeatSupervisor(rs *RaftServer) {
 			rs.lock.Lock()
 			if r.Term > rs.currentTerm {
 				becomeFollower(rs, r.Term)
+			}
+			rs.lock.Unlock()
+		}
+	}
+}
+
+// applyEntrySupervisor() is the goroutine responsible for
+// processing non-heartbeat sendAppendEntries() log replication responses from followers.
+func applyEntrySupervisor(rs *RaftServer) {
+	for {
+		select {
+		case r := <-rs.aerCh:
+			log.Printf("Recieved AppendEntry() response: %v", r)
+			rs.lock.Lock()
+
+			if r.Term > rs.currentTerm {
+				becomeFollower(rs, r.Term)
+			}
+
+			lastLogIndex := r.LeaderPrevLogIndex + 1
+			if r.Success {
+				// TODO: We need to be supporting adding multiple entries at once, once we support that in AppendEntries() RPC
+				entries := r.AddedEntries
+				entry := (*entries)[0]
+
+				rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
+				rs.nextIndex[r.PeerId]++
+
+				log.Printf("lastLogIndex: %v; rs.commitIndex: %v; len(rs.log): %v; rs.currentTerm: %v", lastLogIndex, rs.commitIndex, len(rs.log), rs.currentTerm)
+
+				if lastLogIndex > rs.commitIndex && rs.log[lastLogIndex].Term == rs.currentTerm {
+					// Check if we have a majority to commit:
+					c := 0
+					for i, mi := range rs.matchIndex {
+						if i != rs.serverId && mi >= lastLogIndex {
+							c++
+						}
+					}
+					if c >= len(rs.peerAddrs)/2 {
+						log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
+						rs.commitIndex = lastLogIndex
+						rs.stateMachine.Apply(entry)
+						rs.lastApplied = lastLogIndex
+					}
+				}
+			} else {
+				// TODO: if AppendEntries fails because of log inconsistency
+				// decrement rs.nextIndex[peerId] and try again
+				// <-----
+
+				log.Printf("TODO: Implement the failure path. BOOM!")
 			}
 			rs.lock.Unlock()
 		}
@@ -83,7 +134,11 @@ type AppendEntryReq struct {
 type AppendEntryRes struct {
 	Term    int64 // CurrentTerm for leader to update itself
 	Success bool  // true if follower contained entry matching prevLogIndex and prevLogTerm
-	PeerId  int   // Added for convenience
+
+	// Added for leader convenience:
+	PeerId             int
+	LeaderPrevLogIndex int64
+	AddedEntries       *[]LogEntry
 }
 
 // AppendEntries is called by the leader to replicate LogEntrys and to maintain a heartbeat
@@ -96,6 +151,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 
 	res.Term = rs.currentTerm
 	res.PeerId = rs.serverId
+	res.LeaderPrevLogIndex = req.PrevLogIndex
 
 	if req.Term < rs.currentTerm {
 		// ignore request from a node with a less recent term
@@ -112,7 +168,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		return nil
 	}
 
-	// Add new entries if not a heartbeat:
+	// Add new entries to rs.log if not a heartbeat:
 	if req.Entries != nil {
 		log.Printf("New Entries: %v", req.Entries)
 
@@ -120,15 +176,27 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		// but different terms), delete the existing entry and all that
 		// follow it
 
-		// TODO: Append any new entries not already in the log
-
-		// TODO: If leaderCommit > commitIndex, set commitIndex =
-		// min(leaderCommit, index of last new entry)
+		// Append any new entries not already in the log
+		i := req.PrevLogIndex + 1
+		for _, e := range *req.Entries {
+			if i > int64(len(rs.log)-1) {
+				rs.log = append(rs.log, e)
+			}
+			i++
+		}
+		res.AddedEntries = req.Entries
 	}
 
-	// TODO: Apply any commited log entries to this server's state machine:
-	// * If commitIndex > lastApplied: increment lastApplied, apply
-	// log[lastApplied] to state machine.
+	if req.LeaderCommit > rs.commitIndex {
+		rs.commitIndex = min(req.LeaderCommit, int64(len(rs.log)-1))
+	}
+
+	// Apply any newly commited log entries to this server's state machine:
+	if rs.commitIndex > rs.lastApplied {
+		rs.lastApplied++
+		e := rs.log[rs.lastApplied]
+		rs.stateMachine.Apply(e)
+	}
 
 	if rs.position == Candidate || rs.position == Leader && req.Term > rs.currentTerm {
 		becomeFollower(rs, req.Term)
