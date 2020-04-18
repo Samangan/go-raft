@@ -131,10 +131,11 @@ func becomeLeader(rs *RaftServer, voteCount int) {
 	rs.position = Leader
 
 	// init nextIndex / matchIndex:
+	lastLogIndex, _ := rs.getLastLogInfo()
 	rs.nextIndex = make([]int64, len(rs.peerAddrs))
 	rs.matchIndex = make([]int64, len(rs.peerAddrs))
 	for i, _ := range rs.nextIndex {
-		rs.nextIndex[i] = int64(len(rs.log) + 1)
+		rs.nextIndex[i] = lastLogIndex + 1
 	}
 
 	// TODO: Ideally I would kill this applyEntrySupervisor goroutine when this node

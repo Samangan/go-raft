@@ -2,6 +2,7 @@ package raft
 
 import (
 	"errors"
+	"log"
 	"sync"
 )
 
@@ -102,15 +103,41 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 
 	rs.log = append(rs.log, entry)
 
-	prevLogIndex, prevLogTerm := rs.getPrevLogInfo()
-	entries := &[]LogEntry{entry}
+	// Build AppendEntryReq for each follower:
+	aes := map[string]*AppendEntryReq{}
+	for i, nextIndex := range rs.nextIndex {
+		if i == rs.serverId {
+			continue
+		}
+		es := []LogEntry{}
+		for idx := nextIndex; idx <= int64(len(rs.log)-1); idx++ {
+			es = append(es, rs.log[idx])
+		}
 
-	// TODO: I shouldn't only send the latest LogEntry to each peer, I need to send all the ones
-	//       that they are missing via rs.nextIndex.
-	//       (Also be sure to change the nextIndex/matchIndex success logic below to match this change)
-	sendAppendEntries(rs.peerAddrs, rs.serverId, rs.currentTerm, rs.commitIndex, prevLogIndex, prevLogTerm, entries, rs.aerCh)
+		log.Printf("rs.nextIndex[%v]: %v", i, rs.nextIndex)
+		log.Printf("es: %v", es)
 
-	return prevLogIndex + 1, rs.currentTerm, nil
+		prevLogIndex := nextIndex - int64(1)
+		var prevLogTerm int64
+		if prevLogIndex >= 0 {
+			prevLogTerm = rs.log[prevLogIndex].Term
+		} else {
+			prevLogTerm = -1
+		}
+
+		aes[rs.peerAddrs[i]] = &AppendEntryReq{
+			LeaderId:     rs.serverId,
+			Term:         rs.currentTerm,
+			LeaderCommit: rs.commitIndex,
+			PrevLogIndex: prevLogIndex,
+			PrevLogTerm:  prevLogTerm,
+			Entries:      &es,
+		}
+
+	}
+	sendAppendEntries(aes, rs.aerCh)
+
+	return int64(len(rs.log) - 1), rs.currentTerm, nil
 }
 
 // GetLeader() returns what this server thinks is the current leader.
@@ -141,23 +168,11 @@ func (*RaftServer) IsAlive() bool {
 	return true
 }
 
-func (rs *RaftServer) getLastLogInfo() (lastLogIndex int64, lostLogTerm int64) {
-	lastLogIndex = int64(len(rs.log) - 1)
-	var lastLogTerm int64
-	if lastLogIndex > 0 {
-		lastLogTerm = rs.log[lastLogIndex].Term
-	} else {
-		lastLogTerm = -1
+func (rs *RaftServer) getLastLogInfo() (logIndex int64, logTerm int64) {
+	if len(rs.log)-1 < 0 {
+		return -1, -1
 	}
-	return lastLogIndex, lastLogTerm
-}
-
-// TODO: Combine both of these into one function
-func (rs *RaftServer) getPrevLogInfo() (prevLogIndex int64, prevLogTerm int64) {
-	if len(rs.log) > 1 {
-		prevLogIndex := int64(len(rs.log) - 2)
-		prevLogTerm = rs.log[prevLogIndex].Term
-		return prevLogIndex, prevLogTerm
-	}
-	return -1, -1
+	logIndex = int64(len(rs.log) - 1)
+	logTerm = rs.log[logIndex].Term
+	return logIndex, logTerm
 }

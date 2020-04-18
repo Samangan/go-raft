@@ -22,8 +22,21 @@ func heartbeatSupervisor(rs *RaftServer) {
 			if rs.position == Leader {
 				log.Printf("Sending heartbeats. . .")
 
-				prevLogIndex, prevLogTerm := rs.getPrevLogInfo()
-				sendAppendEntries(rs.peerAddrs, rs.serverId, rs.currentTerm, rs.commitIndex, prevLogIndex, prevLogTerm, nil, beatResCh)
+				aes := map[string]*AppendEntryReq{}
+				for i, p := range rs.peerAddrs {
+					if i == rs.serverId {
+						continue
+					}
+					aes[p] = &AppendEntryReq{
+						LeaderId:     rs.serverId,
+						Term:         rs.currentTerm,
+						LeaderCommit: rs.commitIndex,
+						PrevLogIndex: -1,
+						PrevLogTerm:  -1,
+						Entries:      nil,
+					}
+				}
+				sendAppendEntries(aes, beatResCh)
 			}
 			rs.lock.RUnlock()
 
@@ -50,37 +63,36 @@ func applyEntrySupervisor(rs *RaftServer) {
 				becomeFollower(rs, r.Term)
 			}
 
-			lastLogIndex := r.LeaderPrevLogIndex + 1
 			if r.Success {
-				// TODO: We need to be supporting adding multiple entries at once, once we support that in AppendEntries() RPC
 				entries := r.AddedEntries
-				entry := (*entries)[0]
+				for i, e := range *entries {
+					rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
+					rs.nextIndex[r.PeerId]++
 
-				rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
-				rs.nextIndex[r.PeerId]++
+					idx := r.LeaderPrevLogIndex + 1 + int64(i)
+					log.Printf("curIdx: %v; rs.commitIndex: %v; len(rs.log): %v; rs.currentTerm: %v", idx, rs.commitIndex, len(rs.log), rs.currentTerm)
 
-				log.Printf("lastLogIndex: %v; rs.commitIndex: %v; len(rs.log): %v; rs.currentTerm: %v", lastLogIndex, rs.commitIndex, len(rs.log), rs.currentTerm)
-
-				if lastLogIndex > rs.commitIndex && rs.log[lastLogIndex].Term == rs.currentTerm {
-					// Check if we have a majority to commit:
-					c := 0
-					for i, mi := range rs.matchIndex {
-						if i != rs.serverId && mi >= lastLogIndex {
-							c++
+					if idx > rs.commitIndex && rs.log[idx].Term == rs.currentTerm {
+						// Check if we have a majority to commit:
+						c := 0
+						for i, mi := range rs.matchIndex {
+							if i != rs.serverId && mi >= idx {
+								c++
+							}
 						}
-					}
-					if c >= len(rs.peerAddrs)/2 {
-						log.Printf("Commited LogEntryIndex %v across %v nodes", lastLogIndex, c)
-						rs.commitIndex = lastLogIndex
-						rs.stateMachine.Apply(entry)
-						rs.lastApplied = lastLogIndex
+						if c >= len(rs.peerAddrs)/2+1 {
+							log.Printf("Commited LogEntryIndex %v across %v nodes", idx, c)
+							rs.commitIndex = idx
+							rs.stateMachine.Apply(e)
+							rs.lastApplied = idx
+						}
 					}
 				}
 			} else {
 				// TODO: if AppendEntries fails because of log inconsistency
 				// decrement rs.nextIndex[peerId] and try again
-				// <-----
-
+				// * Call sendAppendEntries() with a req map only for this peer
+				//   (now that I have allowed for that)
 				log.Printf("TODO: Implement the failure path. BOOM!")
 			}
 			rs.lock.Unlock()
@@ -91,31 +103,19 @@ func applyEntrySupervisor(rs *RaftServer) {
 // sendAppendEntries() sends new LogEntrys to followers.
 // Leave `entries` nil for heartbeats.
 
-// TODO: This function has too many params, just take in peers and AppendEntryRes!
-func sendAppendEntries(peers []string, serverId int, currentTerm, commitIndex, prevLogIndex, prevLogTerm int64, entries *[]LogEntry, aeResCh chan *AppendEntryRes) {
-	for i, p := range peers {
-		if i == serverId {
-			continue
-		}
-
-		go func(peer string) {
-			req := &AppendEntryReq{
-				LeaderId:     serverId,
-				Term:         currentTerm,
-				LeaderCommit: commitIndex,
-				PrevLogIndex: prevLogIndex,
-				PrevLogTerm:  prevLogTerm,
-				Entries:      entries,
-			}
+// TODO: This function has too many params, just take in peers and []AppendEntryReq for each peer!
+func sendAppendEntries(aes map[string]*AppendEntryReq, aeResCh chan *AppendEntryRes) {
+	for peer, req := range aes {
+		go func(p string) {
 			res := &AppendEntryRes{}
-			err := sendRPC(peer, "RPCHandler.AppendEntries", req, res)
+			err := sendRPC(p, "RPCHandler.AppendEntries", req, res)
 			if err != nil {
 				log.Printf("Error sending AppendEntries RPC: %v", err)
 				// TODO: If not a heartbeat, then we should keep retrying forever
 			} else {
 				aeResCh <- res
 			}
-		}(p)
+		}(peer)
 	}
 }
 
@@ -123,17 +123,18 @@ func sendAppendEntries(peers []string, serverId int, currentTerm, commitIndex, p
 // AppendEntry RPC endpoint
 //
 type AppendEntryReq struct {
-	Term         int64 // leader's currentTerm
-	LeaderId     int   // so follower can redirect clients
-	PrevLogIndex int64
-	PrevLogTerm  int64
+	Term         int64       // leader's currentTerm
+	LeaderId     int         // so follower can redirect clients
+	PrevLogIndex int64       // LogEntry index previous to the first entry in `Entries` below
+	PrevLogTerm  int64       // Term for that previous LogEntry to the first newest entry
 	Entries      *[]LogEntry // new LogEntries to store (nil for heartbeat)
 	LeaderCommit int64       // leader's current commitIndex
 }
 
 type AppendEntryRes struct {
-	Term    int64 // CurrentTerm for leader to update itself
-	Success bool  // true if follower contained entry matching prevLogIndex and prevLogTerm
+	Term    int64  // CurrentTerm for leader to update itself
+	Success bool   // true if follower contained entry matching prevLogIndex and prevLogTerm
+	Error   string // TODO: Make these actual error types instead of matching on strings
 
 	// Added for leader convenience:
 	PeerId             int
@@ -156,21 +157,21 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 	if req.Term < rs.currentTerm {
 		// ignore request from a node with a less recent term
 		res.Success = false
+		res.Error = "wrong_term"
 		return nil
 	}
 
 	if req.PrevLogIndex != -1 && (int64(len(rs.log)-1) < req.PrevLogIndex || rs.log[req.PrevLogIndex].Term != req.PrevLogTerm) {
 		// Reply false if log doesn’t contain an entry at prevLogIndex
 		// whose term matches prevLogTerm
-
-		// TODO: I should add an error reason to explain why Im returning success=false each time
 		res.Success = false
+		res.Error = "log_inconsistent"
 		return nil
 	}
 
 	// Add new entries to rs.log if not a heartbeat:
 	if req.Entries != nil {
-		log.Printf("New Entries: %v", req.Entries)
+		log.Printf("Adding %v New Entries: ", len(*req.Entries))
 
 		// TODO: If an existing entry conflicts with a new one (same index
 		// but different terms), delete the existing entry and all that

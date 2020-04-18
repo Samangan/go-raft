@@ -85,6 +85,7 @@ func main() {
 		r.ApplyEntry(b)
 
 		log.Println("[CLIENT] Calling ApplyEntry again. . .")
+
 		c = &KVCommand{
 			Key:       "y",
 			Value:     "1000",
@@ -96,18 +97,14 @@ func main() {
 		}
 		r.ApplyEntry(b)
 
+		log.Println("[CLIENT] Calling ApplyEntry again. . .")
+
 		c.Value = "-1"
 		b, err = json.Marshal(c)
 		if err != nil {
 			panic(err)
 		}
 		r.ApplyEntry(b)
-
-		// TODO: This isnt going to ALWAYS work because, each time I immediately
-		// add the new entry to the leader's log and Im only sending one entry each time
-		// and more importantly I havent implemented the AppendEntry() response failure logic
-		// to work backwards sending older entries until the followers are caught up.
-		// <---- (This is a good case to test that that works though)
 	}
 
 	for {
