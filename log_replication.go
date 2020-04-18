@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// heartbeatSupervisor() is the goroutine responsible for:
-// * Sending and receiving periodic heartbeats to all peers to maintain allegiance if Leader
+// heartbeatSupervisor() is the goroutine responsible for
+// sending and receiving periodic heartbeats to all peers to maintain allegiance
 func heartbeatSupervisor(rs *RaftServer) {
 	timeout := 1 * time.Second // TODO: Make these configurable so I can have long debug times locally
 
@@ -57,9 +57,7 @@ func applyEntrySupervisor(rs *RaftServer) {
 	for {
 		select {
 		case r := <-rs.aerCh:
-			log.Printf("Recieved AppendEntry() response: %v", r)
 			rs.lock.Lock()
-
 			if r.Term > rs.currentTerm {
 				becomeFollower(rs, r.Term)
 			}
@@ -80,7 +78,7 @@ func applyEntrySupervisor(rs *RaftServer) {
 							}
 						}
 						if c >= len(rs.peerAddrs)/2+1 {
-							log.Printf("Commited LogEntryIndex %v across %v nodes", idx, c)
+							log.Printf("====Commited LogEntryIndex %v across %v nodes====", idx, c)
 							rs.commitIndex = idx
 							rs.stateMachine.Apply(e)
 							rs.lastApplied = idx
@@ -88,10 +86,10 @@ func applyEntrySupervisor(rs *RaftServer) {
 					}
 				}
 			} else {
-				// TODO: if AppendEntries fails because of log inconsistency
-				// decrement rs.nextIndex[peerId] and try again
+				// TODO: if AppendEntries fails because of log inconsistency:
+				// * Decrement rs.nextIndex[peerId]
 				// * Call sendAppendEntries() with a req map only for this peer
-				//   (now that I have allowed for that)
+				//   (now that I have allowed for that) to retry
 				log.Printf("TODO: Implement the failure path. BOOM!")
 			}
 			rs.lock.Unlock()
@@ -101,8 +99,6 @@ func applyEntrySupervisor(rs *RaftServer) {
 
 // sendAppendEntries() sends new LogEntrys to followers.
 // Leave `entries` nil for heartbeats.
-
-// TODO: This function has too many params, just take in peers and []AppendEntryReq for each peer!
 func sendAppendEntries(aes map[string]*AppendEntryReq, aeResCh chan *AppendEntryRes) {
 	for peer, req := range aes {
 		go func(p string) {

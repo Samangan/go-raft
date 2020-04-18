@@ -14,18 +14,19 @@ import (
 	"time"
 )
 
+// A very simple example KVStore client:
 type KVStore struct {
 	store map[string]string
 }
 
 func (kv KVStore) Apply(entry raft.LogEntry) interface{} {
-	log.Printf("[Apply()] Applying new entry to stateMachine")
-
 	command := &KVCommand{}
 	err := json.Unmarshal(entry.Command, command)
 	if err != nil {
 		panic(err)
 	}
+
+	log.Printf("[Apply()] Applying new entry to stateMachine")
 	log.Printf("-- command: %v --", command)
 
 	if command.Operation == Put {
@@ -59,10 +60,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// TODO: Testing this is going to be hard until I have an actual client usage of this.
-	// I should make:
-	// * Unit tests
-	// * "Integration" test suite that will test through common things with multiple nodes
+	// TODO: This is just some manual E2E testing. I should add real tests:
+	// * Unit tests for individual functions.
+	// * "Integration" style test suite that will test through common higher level things like elections, log replication
 
 	// NOTE: For now doing some more manual testing on each node:
 	for _, err := r.GetLeader(); err != nil; {
