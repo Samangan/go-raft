@@ -31,6 +31,7 @@ func heartbeatSupervisor(rs *RaftServer) {
 						LeaderId:     rs.serverId,
 						Term:         rs.currentTerm,
 						LeaderCommit: rs.commitIndex,
+						// heartbeats don't send any new LogEntries:
 						PrevLogIndex: -1,
 						PrevLogTerm:  -1,
 						Entries:      nil,
@@ -70,8 +71,6 @@ func applyEntrySupervisor(rs *RaftServer) {
 					rs.nextIndex[r.PeerId]++
 
 					idx := r.LeaderPrevLogIndex + 1 + int64(i)
-					log.Printf("curIdx: %v; rs.commitIndex: %v; len(rs.log): %v; rs.currentTerm: %v", idx, rs.commitIndex, len(rs.log), rs.currentTerm)
-
 					if idx > rs.commitIndex && rs.log[idx].Term == rs.currentTerm {
 						// Check if we have a majority to commit:
 						c := 0
@@ -145,8 +144,6 @@ type AppendEntryRes struct {
 // AppendEntries is called by the leader to replicate LogEntrys and to maintain a heartbeat
 func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) error {
 	rs := rh.rs
-	log.Printf("AppendEntries -> [%v]: \n", rs.address)
-
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 

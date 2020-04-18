@@ -2,7 +2,6 @@ package raft
 
 import (
 	"errors"
-	"log"
 	"sync"
 )
 
@@ -114,9 +113,6 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 			es = append(es, rs.log[idx])
 		}
 
-		log.Printf("rs.nextIndex[%v]: %v", i, rs.nextIndex)
-		log.Printf("es: %v", es)
-
 		prevLogIndex := nextIndex - int64(1)
 		var prevLogTerm int64
 		if prevLogIndex >= 0 {
@@ -133,7 +129,6 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 			PrevLogTerm:  prevLogTerm,
 			Entries:      &es,
 		}
-
 	}
 	sendAppendEntries(aes, rs.aerCh)
 
