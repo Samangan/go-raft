@@ -49,13 +49,20 @@ const (
 
 func main() {
 	// NOTE: defined in docker-compose.yml
-	peerAddrs := []string{"node0", "node1", "node2", "node3"}
+	peerAddrs := []string{"node0", "node1", "node2", "node3", "node4"}
 	me, _ := strconv.Atoi(os.Getenv("ID"))
 
 	log.Printf("[CLIENT] Starting up server [%v: %v]", me, peerAddrs[me])
 	kvs := KVStore{make(map[string]string)}
+	config := &raft.Config{
+		RpcPort:             8000,
+		HeartbeatTimeout:    1 * time.Second,
+		ElectionTimeoutMax:  50,
+		ElectionTimeoutMin:  10,
+		ElectionTimeoutUnit: time.Second,
+	}
 
-	r, err := raft.NewServer(me, peerAddrs, kvs)
+	r, err := raft.NewServer(me, peerAddrs, kvs, config)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +71,6 @@ func main() {
 	// * Unit tests for individual functions.
 	// * "Integration" style test suite that will test through common higher level things like elections, log replication
 
-	// NOTE: For now doing some more manual testing on each node:
 	for _, err := r.GetLeader(); err != nil; {
 		log.Printf("[CLIENT] Waiting for a leader to be elected. . .")
 		time.Sleep(10 * time.Second)
@@ -105,6 +111,10 @@ func main() {
 			panic(err)
 		}
 		r.ApplyEntry(b)
+
+		//time.Sleep(30 * time.Second)
+		//log.Println("Killing leader...")
+		//r.Kill()
 	}
 
 	for {

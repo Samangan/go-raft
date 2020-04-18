@@ -8,9 +8,7 @@ import (
 // heartbeatSupervisor() is the goroutine responsible for
 // sending and receiving periodic heartbeats to all peers to maintain allegiance
 func heartbeatSupervisor(rs *RaftServer) {
-	timeout := 1 * time.Second // TODO: Make these configurable so I can have long debug times locally
-
-	ticker := time.NewTicker(timeout)
+	ticker := time.NewTicker(rs.config.HeartbeatTimeout)
 	defer ticker.Stop()
 
 	beatResCh := make(chan *AppendEntryRes, len(rs.peerAddrs))
@@ -47,6 +45,9 @@ func heartbeatSupervisor(rs *RaftServer) {
 				becomeFollower(rs, r.Term)
 			}
 			rs.lock.Unlock()
+		case <-rs.killCh:
+			log.Println("Shutting off heartbeatSupervisor. . .")
+			return
 		}
 	}
 }
@@ -93,6 +94,9 @@ func applyEntrySupervisor(rs *RaftServer) {
 				log.Printf("TODO: Implement the failure path. BOOM!")
 			}
 			rs.lock.Unlock()
+		case <-rs.killCh:
+			log.Println("Shutting off applyEntrySupervisor. . .")
+			return
 		}
 	}
 }
@@ -137,7 +141,7 @@ type AppendEntryRes struct {
 	AddedEntries       *[]LogEntry
 }
 
-// AppendEntries is called by the leader to replicate LogEntrys and to maintain a heartbeat
+// AppendEntries() is called by the leader to replicate LogEntrys and to maintain a heartbeat
 func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) error {
 	rs := rh.rs
 	rs.lock.Lock()

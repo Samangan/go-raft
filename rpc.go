@@ -6,15 +6,15 @@ import (
 	"net/rpc"
 )
 
-const (
-	RPCPort = 8000 // TODO: Make configurable
-)
+var RPCPort int
 
 type RPCHandler struct {
 	rs *RaftServer
 }
 
 func initRPC(address string, rs *RaftServer) error {
+	RPCPort = rs.config.RpcPort
+
 	// Register RPC endpoints:
 	re := &RPCHandler{rs}
 	err := rpc.Register(re)

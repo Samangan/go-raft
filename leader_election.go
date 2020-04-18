@@ -14,17 +14,27 @@ const (
 	Leader    ElectoralPosition = "LEADER"
 )
 
+var (
+	maxElectionTimeout  int
+	minElectionTimeout  int
+	electionTimeoutUnit time.Duration
+)
+
 // electionSupervisor() is the primary election goroutine responsible for:
 // * Election Timeout ticking and resetting
 // * Starting an election after the election timeout
 // * Vote counting during an election phase
 func electionSupervisor(rs *RaftServer) {
 	rand.Seed(time.Now().UTC().UnixNano())
-	timeout := int64(rand.Intn(100)) + 1 // TODO: Remove the debug LOONG timeouts
 
-	log.Printf("Election Timeout: %v ", timeout)
+	maxElectionTimeout = rs.config.ElectionTimeoutMax
+	minElectionTimeout = rs.config.ElectionTimeoutMin
+	electionTimeoutUnit = rs.config.ElectionTimeoutUnit
 
-	d := time.Duration(timeout * int64(time.Second))
+	t := int64(rand.Intn(maxElectionTimeout-minElectionTimeout) + minElectionTimeout)
+	d := time.Duration(t * int64(electionTimeoutUnit))
+	log.Printf("Election Timeout: %v ", t)
+
 	ticker := time.NewTicker(d)
 	defer ticker.Stop()
 
@@ -34,7 +44,7 @@ func electionSupervisor(rs *RaftServer) {
 	for {
 		select {
 		case <-rs.resetElectionTimeoutCh:
-			ticker = resetElectionTimer(ticker, d)
+			ticker = resetElectionTimer(ticker)
 		case t := <-ticker.C:
 			// TODO: make these debug logs only
 			log.Printf("Election Timeout @ %v \n", t)
@@ -46,7 +56,7 @@ func electionSupervisor(rs *RaftServer) {
 					rs.position = Candidate
 				}
 
-				ticker = resetElectionTimer(ticker, d)
+				ticker = resetElectionTimer(ticker)
 				voteCount = 0
 				startElection(rs, voteCh)
 			}
@@ -65,21 +75,23 @@ func electionSupervisor(rs *RaftServer) {
 				}
 			}
 			rs.lock.Unlock()
+		case <-rs.killCh:
+			log.Println("Shutting off electionSupervisor. . .")
+			return
 		}
 	}
 
 }
 
-func resetElectionTimer(t *time.Ticker, d time.Duration) *time.Ticker {
-	// TODO: This should recalculate a new random duration each time
-	//       so that when peers' timeouts accidentally align it auto heals
-	//       without being livelocked forever...
-
+func resetElectionTimer(ticker *time.Ticker) *time.Ticker {
 	log.Printf("Reset Election Timeout")
 
 	// PERFORMANCE TODO: This is allocating a new channel each heartbeat lol...
 	//                   Change initElectionTimeout() to just use time.Sleep() manually.
-	t.Stop()
+	ticker.Stop()
+
+	t := int64(rand.Intn(maxElectionTimeout-minElectionTimeout) + minElectionTimeout)
+	d := time.Duration(t * int64(electionTimeoutUnit))
 	return time.NewTicker(d)
 }
 

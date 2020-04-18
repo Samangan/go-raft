@@ -3,6 +3,7 @@ package raft
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 type RaftServer struct {
@@ -30,12 +31,19 @@ type RaftServer struct {
 	resetElectionTimeoutCh chan bool            // triggers an election timeout reset
 	aerCh                  chan *AppendEntryRes // used to process replication log responses from followers
 
-	stateMachine FSM // client supplied state machine where committed commands will be applied
+	stateMachine FSM       // client supplied state machine where committed commands will be applied
+	config       *Config   // optional configuration overrides various default values
+	alive        bool      // true if the server is currently active
+	killCh       chan bool // used to kill all goroutines in the event of shutting down the server
 }
 
 // NewServer() will create and start a new Raft peer.
 // This will setup the RPC endpoints and begin the countdown for leader election.
-func NewServer(me int, peerAddrs []string, stateMachine FSM) (*RaftServer, error) {
+func NewServer(me int, peerAddrs []string, stateMachine FSM, config *Config) (*RaftServer, error) {
+	if config == nil {
+		config = ConfigDefaults()
+	}
+
 	address := peerAddrs[me]
 	rs := &RaftServer{
 		serverId:               me,
@@ -47,6 +55,8 @@ func NewServer(me int, peerAddrs []string, stateMachine FSM) (*RaftServer, error
 		commitIndex:            -1,
 		lastApplied:            -1,
 		position:               Follower,
+		config:                 config,
+		killCh:                 make(chan bool),
 	}
 
 	err := initRPC(address, rs)
@@ -74,6 +84,24 @@ type FSM interface {
 	Apply(LogEntry) interface{}
 }
 
+type Config struct {
+	RpcPort             int
+	HeartbeatTimeout    time.Duration
+	ElectionTimeoutMax  int
+	ElectionTimeoutMin  int
+	ElectionTimeoutUnit time.Duration
+}
+
+func ConfigDefaults() *Config {
+	return &Config{
+		RpcPort:             8000,
+		HeartbeatTimeout:    5 * time.Millisecond,
+		ElectionTimeoutMax:  300,
+		ElectionTimeoutMin:  150,
+		ElectionTimeoutUnit: time.Millisecond,
+	}
+}
+
 // ApplyEntry() starts to process a new command in the replicated log.
 // It will return immediately. rs.stateMachine.Apply() will be called when `command` has been successfully
 // committed and applied to a node.
@@ -88,6 +116,7 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 	defer rs.lock.Unlock()
 
 	if !rs.IsAlive() {
+		// TODO: Make these real exported error types in this file
 		return -1, -1, errors.New("Server was killed")
 	}
 
@@ -102,7 +131,7 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 
 	rs.log = append(rs.log, entry)
 
-	// Build AppendEntryReq for each follower:
+	// build AppendEntryReq for each follower:
 	aes := map[string]*AppendEntryReq{}
 	for i, nextIndex := range rs.nextIndex {
 		if i == rs.serverId {
@@ -151,7 +180,28 @@ func (rs *RaftServer) GetLeader() (leaderAddr string, err error) {
 	return "", errors.New("No leader elected yet")
 }
 
-func (*RaftServer) Kill() {}
+func (rs *RaftServer) Kill() {
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	if !rs.IsAlive() {
+		return
+	}
+
+	// stop heartbeatSupervisor, electionSupervisor, and appendEntrysupervisor
+	for i := 0; i < 3; i++ {
+		rs.killCh <- true
+	}
+
+	// TODO: Kill rpc server goroutine.
+	// This is leaking right now and requires redesign work in rpc.go
+
+	close(rs.resetElectionTimeoutCh)
+	close(rs.aerCh)
+	close(rs.killCh)
+
+	rs.alive = false
+}
 
 func (rs *RaftServer) GetState() (term int64, isLeader bool) {
 	rs.lock.RLock()
