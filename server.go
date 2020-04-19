@@ -28,13 +28,13 @@ type RaftServer struct {
 	peerAddrs []string          // peer network addresses (sorted consistently across all nodes)
 	position  ElectoralPosition // current position in current term
 
-	resetElectionTimeoutCh chan bool            // triggers an election timeout reset
+	resetElectionTimeoutCh chan struct{}        // triggers an election timeout reset
 	aerCh                  chan *AppendEntryRes // used to process replication log responses from followers
 
-	stateMachine FSM       // client supplied state machine where committed commands will be applied
-	config       *Config   // optional configuration overrides various default values
-	alive        bool      // true if the server is currently active
-	killCh       chan bool // used to kill all goroutines in the event of shutting down the server
+	stateMachine FSM           // client supplied state machine where committed commands will be applied
+	config       *Config       // optional configuration overrides various default values
+	alive        bool          // true if the server is currently active
+	killCh       chan struct{} // used to kill all goroutines in the event of shutting down the server
 }
 
 // NewServer() will create and start a new Raft peer.
@@ -50,13 +50,14 @@ func NewServer(me int, peerAddrs []string, stateMachine FSM, config *Config) (*R
 		address:                address,
 		peerAddrs:              peerAddrs,
 		stateMachine:           stateMachine,
-		resetElectionTimeoutCh: make(chan bool),
-		aerCh:                  make(chan *AppendEntryRes), // TODO: Should this be a buffered channel?
+		resetElectionTimeoutCh: make(chan struct{}),
+		aerCh:                  make(chan *AppendEntryRes),
 		commitIndex:            -1,
 		lastApplied:            -1,
 		position:               Follower,
 		config:                 config,
-		killCh:                 make(chan bool),
+		alive:                  true,
+		killCh:                 make(chan struct{}, 4),
 	}
 
 	err := initRPC(address, rs)
@@ -74,12 +75,8 @@ func NewServer(me int, peerAddrs []string, stateMachine FSM, config *Config) (*R
 type LogEntry struct {
 	Command []byte // command is the actual state change replicated across the peers
 	Term    int64  // the election term when entry was recieved by leader
+}
 
-}
-type ApplyMessage struct {
-	Entry   LogEntry
-	Success bool
-}
 type FSM interface {
 	Apply(LogEntry) interface{}
 }
@@ -169,6 +166,11 @@ func (rs *RaftServer) GetLeader() (leaderAddr string, err error) {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
+	if !rs.IsAlive() {
+		// TODO: Make these real exported error types in this file
+		return "", errors.New("Server was killed")
+	}
+
 	if rs.position == Leader {
 		return rs.address, nil
 	}
@@ -180,6 +182,10 @@ func (rs *RaftServer) GetLeader() (leaderAddr string, err error) {
 	return "", errors.New("No leader elected yet")
 }
 
+// Kill() shuts down this raft server:
+// * Stop the 4 long running goroutines
+// * Stop TCP listener used for incoming rpc connections
+// * Close all channels
 func (rs *RaftServer) Kill() {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -188,13 +194,13 @@ func (rs *RaftServer) Kill() {
 		return
 	}
 
-	// stop heartbeatSupervisor, electionSupervisor, and appendEntrysupervisor
-	for i := 0; i < 3; i++ {
-		rs.killCh <- true
+	// stop heartbeatSupervisor, electionSupervisor, appendEntrysupervisor,
+	// and acceptRPC goroutines:
+	for i := 0; i < 4; i++ {
+		rs.killCh <- struct{}{}
 	}
-
-	// TODO: Kill rpc server goroutine.
-	// This is leaking right now and requires redesign work in rpc.go
+	// send myself an RPC to flush the currently blocking lis.Accept():
+	sendRPC(rs.address, "RPCHandler.AcceptEntry", nil, nil)
 
 	close(rs.resetElectionTimeoutCh)
 	close(rs.aerCh)
@@ -203,14 +209,20 @@ func (rs *RaftServer) Kill() {
 	rs.alive = false
 }
 
-func (rs *RaftServer) GetState() (term int64, isLeader bool) {
+func (rs *RaftServer) GetState() (term int64, isLeader bool, err error) {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	return rs.currentTerm, rs.position == Leader
+
+	if !rs.IsAlive() {
+		// TODO: Make these real exported error types in this file
+		return -1, false, errors.New("Server was killed")
+	}
+
+	return rs.currentTerm, rs.position == Leader, nil
 }
 
-func (*RaftServer) IsAlive() bool {
-	return true
+func (rs *RaftServer) IsAlive() bool {
+	return rs.alive
 }
 
 func (rs *RaftServer) getLastLogInfo() (logIndex int64, logTerm int64) {

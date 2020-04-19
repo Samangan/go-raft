@@ -194,7 +194,7 @@ func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 			rs.votedFor = &req.CandidateId
 
 			// reset election timeout:
-			rs.resetElectionTimeoutCh <- true
+			rs.resetElectionTimeoutCh <- struct{}{}
 
 			res.Term = req.Term
 			res.VoteGranted = true

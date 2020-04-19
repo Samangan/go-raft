@@ -77,7 +77,7 @@ func main() {
 		_, err = r.GetLeader()
 	}
 
-	if _, isLeader := r.GetState(); isLeader {
+	if _, isLeader, _ := r.GetState(); isLeader {
 		log.Println("[CLIENT] Calling ApplyEntry. . .")
 		c := &KVCommand{
 			Key:       "x",
@@ -112,9 +112,19 @@ func main() {
 		}
 		r.ApplyEntry(b)
 
-		//time.Sleep(30 * time.Second)
-		//log.Println("Killing leader...")
-		//r.Kill()
+		time.Sleep(30 * time.Second)
+		log.Println("[CLIENT] Killing leader...")
+		r.Kill()
+
+		log.Println("[CLIENT] Killed.")
+
+		time.Sleep(1 * time.Second)
+		log.Println("[CLIENT] Starting server up again")
+
+		r, err = raft.NewServer(me, peerAddrs, kvs, config)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	for {

@@ -2,6 +2,7 @@ package raft
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 )
@@ -17,12 +18,13 @@ func initRPC(address string, rs *RaftServer) error {
 
 	// Register RPC endpoints:
 	re := &RPCHandler{rs}
-	err := rpc.Register(re)
+	server := rpc.NewServer()
+	err := server.Register(re)
 	if err != nil {
 		return err
 	}
 
-	// Start accepting incoming RPC endpoints from peers:
+	// Start accepting incoming RPC calls from peers:
 	addr, err := net.ResolveTCPAddr("tcp", makeAddr(address))
 	if err != nil {
 		return err
@@ -33,9 +35,29 @@ func initRPC(address string, rs *RaftServer) error {
 		return err
 	}
 
-	go rpc.Accept(l)
+	go acceptRPCs(rs, l, server)
 
 	return nil
+}
+
+func acceptRPCs(rs *RaftServer, lis net.Listener, server *rpc.Server) {
+	for {
+		select {
+		case <-rs.killCh:
+			log.Println("Shutting off RPC goroutine. . .")
+			lis.Close()
+			return
+		default:
+			conn, err := lis.Accept()
+			if err != nil {
+				log.Print("rpc.Serve: accept:", err.Error())
+				lis.Close()
+				return
+			}
+
+			go server.ServeConn(conn)
+		}
+	}
 }
 
 func sendRPC(address, endpoint string, req interface{}, res interface{}) error {

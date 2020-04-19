@@ -203,7 +203,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 	}
 
 	// reset election timeout to maintain allegiance to leader:
-	rs.resetElectionTimeoutCh <- true
+	rs.resetElectionTimeoutCh <- struct{}{}
 
 	res.Success = true
 	return nil
