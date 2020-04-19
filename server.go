@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+var (
+	ErrServerKilled    error = errors.New("server was killed")
+	ErrServerNotLeader error = errors.New("this server is not leader")
+	ErrNoLeader        error = errors.New("no leader elected")
+)
+
 type RaftServer struct {
 	// Persistent state
 	// TODO: These need to be written to disk each time they change
@@ -113,12 +119,11 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 	defer rs.lock.Unlock()
 
 	if !rs.IsAlive() {
-		// TODO: Make these real exported error types in this file
-		return -1, -1, errors.New("Server was killed")
+		return -1, -1, ErrServerKilled
 	}
 
 	if rs.position != Leader {
-		return -1, -1, errors.New("Server not leader")
+		return -1, -1, ErrServerNotLeader
 	}
 
 	entry := LogEntry{
@@ -167,8 +172,7 @@ func (rs *RaftServer) GetLeader() (leaderAddr string, err error) {
 	defer rs.lock.RUnlock()
 
 	if !rs.IsAlive() {
-		// TODO: Make these real exported error types in this file
-		return "", errors.New("Server was killed")
+		return "", ErrServerKilled
 	}
 
 	if rs.position == Leader {
@@ -179,7 +183,7 @@ func (rs *RaftServer) GetLeader() (leaderAddr string, err error) {
 		return rs.peerAddrs[*rs.votedFor], nil
 	}
 
-	return "", errors.New("No leader elected yet")
+	return "", ErrNoLeader
 }
 
 // Kill() shuts down this raft server:
@@ -214,8 +218,7 @@ func (rs *RaftServer) GetState() (term int64, isLeader bool, err error) {
 	defer rs.lock.RUnlock()
 
 	if !rs.IsAlive() {
-		// TODO: Make these real exported error types in this file
-		return -1, false, errors.New("Server was killed")
+		return -1, false, ErrServerKilled
 	}
 
 	return rs.currentTerm, rs.position == Leader, nil
