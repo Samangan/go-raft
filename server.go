@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	ErrServerKilled    error = errors.New("server was killed")
+	ErrServerKilled    error = errors.New("this server was killed")
 	ErrServerNotLeader error = errors.New("this server is not leader")
 	ErrNoLeader        error = errors.New("no leader elected")
 )

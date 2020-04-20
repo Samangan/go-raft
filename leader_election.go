@@ -68,7 +68,7 @@ func electionSupervisor(rs *RaftServer) {
 				becomeFollower(rs, v.Term)
 			}
 
-			if v.Term == rs.currentTerm && rs.position == Candidate {
+			if v.VoteGranted && v.Term == rs.currentTerm && rs.position == Candidate {
 				voteCount++
 				if voteCount >= len(rs.peerAddrs)/2+1 {
 					becomeLeader(rs, voteCount)
@@ -136,6 +136,7 @@ func becomeFollower(rs *RaftServer, newTerm int64) {
 	log.Printf("Transitioning to Follower: [%v -> Follower]\n", rs.position)
 	rs.position = Follower
 	rs.currentTerm = newTerm
+	rs.votedFor = nil
 }
 
 func becomeLeader(rs *RaftServer, voteCount int) {
@@ -173,8 +174,6 @@ type VoteRes struct {
 
 func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 	rs := rh.rs
-	log.Printf("RequestVote -> [%v]: \n", rs.address)
-
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -182,8 +181,12 @@ func (rh *RPCHandler) RequestVote(req *VoteReq, res *VoteRes) error {
 	res.VoteGranted = false
 
 	if req.Term < rs.currentTerm {
-		// ignore request from a node with a less recent term
+		// ignore request from a candidate with a less recent term
 		return nil
+	}
+
+	if req.Term > rs.currentTerm {
+		becomeFollower(rs, req.Term)
 	}
 
 	// if receiver hasn't voted yet and has at least as up to date of log then vote yes

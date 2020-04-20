@@ -67,10 +67,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// TODO: This is just some manual E2E testing. I should add real tests:
-	// * Unit tests for individual functions.
-	// * "Integration" style test suite that will test through common higher level things like elections, log replication
-
 	for _, err := r.GetLeader(); err != nil; {
 		log.Printf("[CLIENT] Waiting for a leader to be elected. . .")
 		time.Sleep(10 * time.Second)
@@ -112,19 +108,19 @@ func main() {
 		}
 		r.ApplyEntry(b)
 
-		time.Sleep(30 * time.Second)
-		log.Println("[CLIENT] Killing leader...")
-		r.Kill()
+		// time.Sleep(30 * time.Second)
+		// log.Println("[CLIENT] Killing leader...")
+		// r.Kill()
 
-		log.Println("[CLIENT] Killed.")
+		// log.Println("[CLIENT] Killed.")
 
-		time.Sleep(1 * time.Second)
-		log.Println("[CLIENT] Starting server up again")
+		// time.Sleep(1 * time.Second)
+		// log.Println("[CLIENT] Starting server up again")
 
-		r, err = raft.NewServer(me, peerAddrs, kvs, config)
-		if err != nil {
-			log.Fatal(err)
-		}
+		// r, err = raft.NewServer(me, peerAddrs, kvs, config)
+		// if err != nil {
+		// 	log.Fatal(err)
+		// }
 	}
 
 	for {

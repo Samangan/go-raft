@@ -1,8 +1,14 @@
 package raft
 
 import (
+	"errors"
 	"log"
 	"time"
+)
+
+var (
+	ErrOldTerm         error = errors.New("leader has outdated term")
+	ErrLogInconsistent error = errors.New("leader has inconsistent log")
 )
 
 // heartbeatSupervisor() is the goroutine responsible for
@@ -131,9 +137,9 @@ type AppendEntryReq struct {
 }
 
 type AppendEntryRes struct {
-	Term    int64  // CurrentTerm for leader to update itself
-	Success bool   // true if follower contained entry matching prevLogIndex and prevLogTerm
-	Error   string // TODO: Make these actual error types instead of matching on strings
+	Term    int64 // CurrentTerm for leader to update itself
+	Success bool  // true if follower contained entry matching prevLogIndex and prevLogTerm
+	Error   error
 
 	// Added for leader convenience:
 	PeerId             int
@@ -154,7 +160,7 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 	if req.Term < rs.currentTerm {
 		// ignore request from a node with a less recent term
 		res.Success = false
-		res.Error = "wrong_term"
+		res.Error = ErrOldTerm
 		return nil
 	}
 
@@ -162,8 +168,12 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		// Reply false if log doesn’t contain an entry at prevLogIndex
 		// whose term matches prevLogTerm
 		res.Success = false
-		res.Error = "log_inconsistent"
+		res.Error = ErrLogInconsistent
 		return nil
+	}
+
+	if req.Term > rs.currentTerm {
+		becomeFollower(rs, req.Term)
 	}
 
 	// Add new entries to rs.log if not a heartbeat:
@@ -194,12 +204,6 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 		rs.lastApplied++
 		e := rs.log[rs.lastApplied]
 		rs.stateMachine.Apply(e)
-	}
-
-	if rs.position == Candidate || rs.position == Leader && req.Term > rs.currentTerm {
-		becomeFollower(rs, req.Term)
-	} else if rs.position == Follower && req.Term > rs.currentTerm {
-		rs.currentTerm = req.Term
 	}
 
 	// reset election timeout to maintain allegiance to leader:
