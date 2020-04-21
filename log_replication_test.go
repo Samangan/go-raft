@@ -209,9 +209,6 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.Success, true)
 
 		assert.Equal(t, len(rs.log), 1)
-		assert.Equal(t, len(*res.AddedEntries), 1)
-		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
 		assert.Equal(t, rs.log[0].Term, int64(2))
 		assert.Equal(t, rs.log[0].Command, []byte{42})
 
@@ -259,14 +256,8 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.Success, true)
 
 		assert.Equal(t, len(rs.log), 2)
-		assert.Equal(t, len(*res.AddedEntries), 2)
-		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
 		assert.Equal(t, rs.log[0].Term, int64(2))
 		assert.Equal(t, rs.log[0].Command, []byte{42})
-
-		assert.Equal(t, (*res.AddedEntries)[1].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[1].Command, []byte{43})
 		assert.Equal(t, rs.log[1].Term, int64(2))
 		assert.Equal(t, rs.log[1].Command, []byte{43})
 
@@ -317,10 +308,6 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.Success, true)
 
 		assert.Equal(t, len(rs.log), 2)
-		assert.Equal(t, len(*res.AddedEntries), 1)
-		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
-
 		assert.Equal(t, rs.log[1].Term, int64(2))
 		assert.Equal(t, rs.log[1].Command, []byte{42})
 
@@ -375,10 +362,6 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.Success, true)
 
 		assert.Equal(t, len(rs.log), 2)
-		assert.Equal(t, len(*res.AddedEntries), 1)
-
-		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
 
 		assert.Equal(t, rs.log[0].Term, int64(1))
 		assert.Equal(t, rs.log[0].Command, []byte{41})
@@ -445,13 +428,6 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.Success, true)
 
 		assert.Equal(t, len(rs.log), 3)
-		assert.Equal(t, len(*res.AddedEntries), 2)
-
-		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{0})
-		assert.Equal(t, (*res.AddedEntries)[1].Term, int64(2))
-		assert.Equal(t, (*res.AddedEntries)[1].Command, []byte{1})
-
 		assert.Equal(t, rs.log[0].Term, int64(1))
 		assert.Equal(t, rs.log[0].Command, []byte{41})
 		assert.Equal(t, rs.log[1].Term, int64(2))

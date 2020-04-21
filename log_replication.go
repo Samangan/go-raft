@@ -70,7 +70,7 @@ func applyEntrySupervisor(rs *RaftServer) {
 			}
 
 			if r.Success {
-				entries := r.AddedEntries
+				entries := r.Entries
 				for i, e := range *entries {
 					rs.matchIndex[r.PeerId] = rs.nextIndex[r.PeerId]
 					rs.nextIndex[r.PeerId]++
@@ -144,7 +144,7 @@ type AppendEntryRes struct {
 	// Added for leader convenience:
 	PeerId             int
 	LeaderPrevLogIndex int64
-	AddedEntries       *[]LogEntry
+	Entries            *[]LogEntry
 }
 
 // AppendEntries() is called by the leader to replicate LogEntrys and to maintain a heartbeat
@@ -182,7 +182,6 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 
 		// Append any new entries not already in the log
 		i := req.PrevLogIndex + 1
-		added := &[]LogEntry{}
 		for _, e := range *req.Entries {
 			if i < int64(len(rs.log))-1 && rs.log[i].Term != e.Term {
 				log.Printf("Removing conflicts on index: %v", i)
@@ -195,11 +194,10 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 
 			if i > int64(len(rs.log)-1) {
 				rs.log = append(rs.log, e)
-				*added = append(*added, e)
 			}
 			i++
 		}
-		res.AddedEntries = added
+		res.Entries = req.Entries
 	}
 
 	if req.LeaderCommit > rs.commitIndex {
