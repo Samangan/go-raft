@@ -177,5 +177,293 @@ func TestHeartbeat(t *testing.T) {
 
 func TestAppendEntry(t *testing.T) {
 
-	// TODO: Implement
+	t.Run("Adds one new entry to log", func(t *testing.T) {
+		log := []LogEntry{}
+		rs := &RaftServer{
+			serverId:               1,
+			currentTerm:            2,
+			resetElectionTimeoutCh: make(chan struct{}, 1),
+			log:                    log,
+			commitIndex:            -1,
+			lastApplied:            -1,
+		}
+		rpcHandler := &RPCHandler{rs}
+
+		req := &AppendEntryReq{
+			Term:         2,
+			LeaderId:     0,
+			PrevLogIndex: -1,
+			PrevLogTerm:  -1,
+			LeaderCommit: -1,
+			Entries: &[]LogEntry{
+				LogEntry{
+					Term:    2,
+					Command: []byte{42},
+				},
+			},
+		}
+		res := &AppendEntryRes{}
+
+		err := rpcHandler.AppendEntries(req, res)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, res.Success, true)
+
+		assert.Equal(t, len(rs.log), 1)
+		assert.Equal(t, len(*res.AddedEntries), 1)
+		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
+		assert.Equal(t, rs.log[0].Term, int64(2))
+		assert.Equal(t, rs.log[0].Command, []byte{42})
+
+		// TODO: Mock statemachine and assert it's not called yet
+		assert.Equal(t, rs.commitIndex, int64(-1))
+		assert.Equal(t, rs.lastApplied, int64(-1))
+		assert.Equal(t, res.Term, rs.currentTerm)
+		assert.Equal(t, res.PeerId, rs.serverId)
+		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
+	})
+
+	t.Run("Adds more than one entry to log", func(t *testing.T) {
+		log := []LogEntry{}
+		rs := &RaftServer{
+			serverId:               1,
+			currentTerm:            2,
+			resetElectionTimeoutCh: make(chan struct{}, 1),
+			log:                    log,
+			commitIndex:            -1,
+			lastApplied:            -1,
+		}
+		rpcHandler := &RPCHandler{rs}
+
+		req := &AppendEntryReq{
+			Term:         2,
+			LeaderId:     0,
+			PrevLogIndex: -1,
+			PrevLogTerm:  -1,
+			LeaderCommit: -1,
+			Entries: &[]LogEntry{
+				LogEntry{
+					Term:    2,
+					Command: []byte{42},
+				},
+				LogEntry{
+					Term:    2,
+					Command: []byte{43},
+				},
+			},
+		}
+		res := &AppendEntryRes{}
+
+		err := rpcHandler.AppendEntries(req, res)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, res.Success, true)
+
+		assert.Equal(t, len(rs.log), 2)
+		assert.Equal(t, len(*res.AddedEntries), 2)
+		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
+		assert.Equal(t, rs.log[0].Term, int64(2))
+		assert.Equal(t, rs.log[0].Command, []byte{42})
+
+		assert.Equal(t, (*res.AddedEntries)[1].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[1].Command, []byte{43})
+		assert.Equal(t, rs.log[1].Term, int64(2))
+		assert.Equal(t, rs.log[1].Command, []byte{43})
+
+		// TODO: Mock statemachine and assert it's not called yet
+		assert.Equal(t, rs.commitIndex, int64(-1))
+		assert.Equal(t, rs.lastApplied, int64(-1))
+		assert.Equal(t, res.Term, rs.currentTerm)
+		assert.Equal(t, res.PeerId, rs.serverId)
+		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
+	})
+
+	t.Run("Adds one new entry to existing log", func(t *testing.T) {
+		log := []LogEntry{
+			LogEntry{
+				Term:    1,
+				Command: []byte{41},
+			},
+		}
+		rs := &RaftServer{
+			serverId:               1,
+			currentTerm:            2,
+			resetElectionTimeoutCh: make(chan struct{}, 1),
+			log:                    log,
+			commitIndex:            -1,
+			lastApplied:            -1,
+		}
+		rpcHandler := &RPCHandler{rs}
+
+		req := &AppendEntryReq{
+			Term:     2,
+			LeaderId: 0,
+
+			PrevLogIndex: 0, // TODO: THere's a bug where PrevLogIndex is -1 and it's also inconsistent. Make a failing test for that.
+			PrevLogTerm:  1,
+
+			LeaderCommit: -1,
+			Entries: &[]LogEntry{
+				LogEntry{
+					Term:    2,
+					Command: []byte{42},
+				},
+			},
+		}
+		res := &AppendEntryRes{}
+
+		err := rpcHandler.AppendEntries(req, res)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, res.Success, true)
+
+		assert.Equal(t, len(rs.log), 2)
+		assert.Equal(t, len(*res.AddedEntries), 1)
+		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
+
+		assert.Equal(t, rs.log[1].Term, int64(2))
+		assert.Equal(t, rs.log[1].Command, []byte{42})
+
+		// TODO: Mock statemachine and assert it's not called yet
+		assert.Equal(t, rs.commitIndex, int64(-1))
+		assert.Equal(t, rs.lastApplied, int64(-1))
+		assert.Equal(t, res.Term, rs.currentTerm)
+		assert.Equal(t, res.PeerId, rs.serverId)
+		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
+	})
+
+	t.Run("Adds only one new entry from multiple sent", func(t *testing.T) {
+		log := []LogEntry{
+			LogEntry{
+				Term:    1,
+				Command: []byte{41},
+			},
+		}
+		rs := &RaftServer{
+			serverId:               1,
+			currentTerm:            2,
+			resetElectionTimeoutCh: make(chan struct{}, 1),
+			log:                    log,
+			commitIndex:            -1,
+			lastApplied:            -1,
+		}
+		rpcHandler := &RPCHandler{rs}
+
+		req := &AppendEntryReq{
+			Term:     2,
+			LeaderId: 0,
+
+			PrevLogIndex: -1,
+			PrevLogTerm:  -1,
+
+			LeaderCommit: -1,
+			Entries: &[]LogEntry{
+				LogEntry{
+					Term:    1,
+					Command: []byte{41},
+				},
+				LogEntry{
+					Term:    2,
+					Command: []byte{42},
+				},
+			},
+		}
+		res := &AppendEntryRes{}
+
+		err := rpcHandler.AppendEntries(req, res)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, res.Success, true)
+
+		assert.Equal(t, len(rs.log), 2)
+		assert.Equal(t, len(*res.AddedEntries), 1)
+
+		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{42})
+
+		assert.Equal(t, rs.log[0].Term, int64(1))
+		assert.Equal(t, rs.log[0].Command, []byte{41})
+		assert.Equal(t, rs.log[1].Term, int64(2))
+		assert.Equal(t, rs.log[1].Command, []byte{42})
+
+		// TODO: Mock statemachine and assert it's not called yet
+		assert.Equal(t, rs.commitIndex, int64(-1))
+		assert.Equal(t, rs.lastApplied, int64(-1))
+		assert.Equal(t, res.Term, rs.currentTerm)
+		assert.Equal(t, res.PeerId, rs.serverId)
+		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
+	})
+
+	t.Run("Existing entry conflicts are removed", func(t *testing.T) {
+		l := []LogEntry{
+			LogEntry{
+				Term:    1,
+				Command: []byte{41},
+			},
+			// below conflicts should be deleted and replaced by req.Entries:
+			LogEntry{
+				Term:    1,
+				Command: []byte{42},
+			},
+			LogEntry{
+				Term:    1,
+				Command: []byte{43},
+			},
+		}
+		rs := &RaftServer{
+			serverId:               1,
+			currentTerm:            2,
+			resetElectionTimeoutCh: make(chan struct{}, 1),
+			log:                    l,
+			commitIndex:            -1,
+			lastApplied:            -1,
+		}
+		rpcHandler := &RPCHandler{rs}
+
+		req := &AppendEntryReq{
+			Term:     2,
+			LeaderId: 0,
+
+			PrevLogIndex: 0,
+			PrevLogTerm:  1,
+
+			LeaderCommit: -1,
+			Entries: &[]LogEntry{
+				LogEntry{
+					Term:    2,
+					Command: []byte{0},
+				},
+				LogEntry{
+					Term:    2,
+					Command: []byte{1},
+				},
+			},
+		}
+		res := &AppendEntryRes{}
+
+		err := rpcHandler.AppendEntries(req, res)
+		assert.Equal(t, err, nil)
+		assert.Equal(t, res.Success, true)
+
+		assert.Equal(t, len(rs.log), 3)
+		assert.Equal(t, len(*res.AddedEntries), 2)
+
+		assert.Equal(t, (*res.AddedEntries)[0].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[0].Command, []byte{0})
+		assert.Equal(t, (*res.AddedEntries)[1].Term, int64(2))
+		assert.Equal(t, (*res.AddedEntries)[1].Command, []byte{1})
+
+		assert.Equal(t, rs.log[0].Term, int64(1))
+		assert.Equal(t, rs.log[0].Command, []byte{41})
+		assert.Equal(t, rs.log[1].Term, int64(2))
+		assert.Equal(t, rs.log[1].Command, []byte{0})
+		assert.Equal(t, rs.log[2].Term, int64(2))
+		assert.Equal(t, rs.log[2].Command, []byte{1})
+
+		// TODO: Mock statemachine and assert it's not called yet
+		assert.Equal(t, rs.commitIndex, int64(-1))
+		assert.Equal(t, rs.lastApplied, int64(-1))
+		assert.Equal(t, res.Term, rs.currentTerm)
+		assert.Equal(t, res.PeerId, rs.serverId)
+		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
+	})
 }

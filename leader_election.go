@@ -160,12 +160,10 @@ func becomeLeader(rs *RaftServer, voteCount int) {
 // RequestVote RPC endpoint
 //
 type VoteReq struct {
-	Term        int64 // candidate's term
-	CandidateId int   // candidate serverId requesting the vote
-
+	Term         int64 // candidate's term
+	CandidateId  int   // candidate serverId requesting the vote
 	LastLogIndex int64 // index of the candidate's last LogEntry
 	LastLogTerm  int64 // term of the candidate's last LogEntry
-
 }
 type VoteRes struct {
 	Term        int64 // this node's currentTerm

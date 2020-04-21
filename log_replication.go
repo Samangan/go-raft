@@ -178,21 +178,28 @@ func (rh *RPCHandler) AppendEntries(req *AppendEntryReq, res *AppendEntryRes) er
 
 	// Add new entries to rs.log if not a heartbeat:
 	if req.Entries != nil {
-		log.Printf("Adding %v New Entries: ", len(*req.Entries))
-
-		// TODO: If an existing entry conflicts with a new one (same index
-		// but different terms), delete the existing entry and all that
-		// follow it
+		log.Printf("Processing %v New Entries: ", len(*req.Entries))
 
 		// Append any new entries not already in the log
 		i := req.PrevLogIndex + 1
+		added := &[]LogEntry{}
 		for _, e := range *req.Entries {
+			if i < int64(len(rs.log))-1 && rs.log[i].Term != e.Term {
+				log.Printf("Removing conflicts on index: %v", i)
+				// `e` conflicts with an existing entry.
+				// delete this entry and all that follow it:
+				for idx, len := i, int64(len(rs.log)); i < len; i++ {
+					rs.log = append(rs.log[:idx], rs.log[idx+1:]...)
+				}
+			}
+
 			if i > int64(len(rs.log)-1) {
 				rs.log = append(rs.log, e)
+				*added = append(*added, e)
 			}
 			i++
 		}
-		res.AddedEntries = req.Entries
+		res.AddedEntries = added
 	}
 
 	if req.LeaderCommit > rs.commitIndex {
