@@ -92,12 +92,14 @@ func applyEntrySupervisor(rs *RaftServer) {
 						}
 					}
 				}
-			} else {
-				// TODO: if AppendEntries fails because of log inconsistency:
-				// * Decrement rs.nextIndex[peerId]
-				// * Call sendAppendEntries() with a req map only for this peer
-				//   (now that I have allowed for that) to retry
-				log.Printf("TODO: Implement the failure path. BOOM!")
+			} else if r.Error == ErrLogInconsistent {
+				log.Println("Sending another AppendEntry() to resolve log inconsistency")
+				// retry with more data (eventually they will line up):
+				rs.nextIndex[r.PeerId]--
+				aes := map[string]*AppendEntryReq{
+					rs.peerAddrs[r.PeerId]: rs.getAppendEntryReqForPeer(r.PeerId),
+				}
+				sendAppendEntries(aes, rs.aerCh)
 			}
 			rs.lock.Unlock()
 		case <-rs.killCh:

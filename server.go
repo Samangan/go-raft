@@ -133,33 +133,12 @@ func (rs *RaftServer) ApplyEntry(command []byte) (index int64, term int64, err e
 
 	rs.log = append(rs.log, entry)
 
-	// build AppendEntryReq for each follower:
 	aes := map[string]*AppendEntryReq{}
-	for i, nextIndex := range rs.nextIndex {
+	for i, _ := range rs.nextIndex {
 		if i == rs.serverId {
 			continue
 		}
-		es := []LogEntry{}
-		for idx := nextIndex; idx <= int64(len(rs.log)-1); idx++ {
-			es = append(es, rs.log[idx])
-		}
-
-		prevLogIndex := nextIndex - int64(1)
-		var prevLogTerm int64
-		if prevLogIndex >= 0 {
-			prevLogTerm = rs.log[prevLogIndex].Term
-		} else {
-			prevLogTerm = -1
-		}
-
-		aes[rs.peerAddrs[i]] = &AppendEntryReq{
-			LeaderId:     rs.serverId,
-			Term:         rs.currentTerm,
-			LeaderCommit: rs.commitIndex,
-			PrevLogIndex: prevLogIndex,
-			PrevLogTerm:  prevLogTerm,
-			Entries:      &es,
-		}
+		aes[rs.peerAddrs[i]] = rs.getAppendEntryReqForPeer(i)
 	}
 	sendAppendEntries(aes, rs.aerCh)
 
@@ -235,4 +214,28 @@ func (rs *RaftServer) getLastLogInfo() (logIndex int64, logTerm int64) {
 	logIndex = int64(len(rs.log) - 1)
 	logTerm = rs.log[logIndex].Term
 	return logIndex, logTerm
+}
+
+func (rs *RaftServer) getAppendEntryReqForPeer(peerId int) *AppendEntryReq {
+	es := []LogEntry{}
+	for i := rs.nextIndex[peerId]; i <= int64(len(rs.log)-1); i++ {
+		es = append(es, rs.log[i])
+	}
+
+	prevLogIndex := rs.nextIndex[peerId] - int64(1)
+	var prevLogTerm int64
+	if prevLogIndex >= 0 {
+		prevLogTerm = rs.log[prevLogIndex].Term
+	} else {
+		prevLogTerm = -1
+	}
+
+	return &AppendEntryReq{
+		LeaderId:     rs.serverId,
+		Term:         rs.currentTerm,
+		LeaderCommit: rs.commitIndex,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      &es,
+	}
 }

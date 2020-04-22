@@ -290,7 +290,7 @@ func TestAppendEntry(t *testing.T) {
 			Term:     2,
 			LeaderId: 0,
 
-			PrevLogIndex: 0, // TODO: THere's a bug where PrevLogIndex is -1 and it's also inconsistent. Make a failing test for that.
+			PrevLogIndex: 0,
 			PrevLogTerm:  1,
 
 			LeaderCommit: -1,
@@ -442,4 +442,5 @@ func TestAppendEntry(t *testing.T) {
 		assert.Equal(t, res.PeerId, rs.serverId)
 		assert.Equal(t, res.LeaderPrevLogIndex, req.PrevLogIndex)
 	})
+
 }
